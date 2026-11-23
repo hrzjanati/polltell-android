@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">پل‌تل</string>
+    <string name="dialer_label">تلفن پل‌تل</string>
+    <string name="channel_link">اتصال</string>
+    <string name="channel_calls">تماس‌ها</string>
+    <string name="channel_setup">راه‌اندازی</string>
+    <string name="channel_find">پیدا کردن گوشی</string>
+    <string name="find_title">در حال زنگ زدن: پیدا کردن گوشی</string>
+    <string name="find_text">قفل گوشی را باز کنید یا توقف را بزنید</string>
+    <string name="find_stop">توقف</string>
+    <string name="notif_link_waiting">در انتظار آیفون</string>
+    <string name="notif_link_connected">به آیفون وصل است</string>
+    <string name="notif_link_unpaired">جفت نشده است. برای جفت کردن پل‌تل را باز کنید.</string>
+    <string name="notif_bt_off">بلوتوث خاموش است</string>
+
+    <string name="section_link">اتصال آیفون</string>
+    <string name="section_setup">راه‌اندازی</string>
+    <string name="section_audio">صدای تماس</string>
+    <string name="state_connected">وصل</string>
+    <string name="state_waiting">در حال اعلام حضور، منتظر آیفون</string>
+    <string name="state_unpaired">جفت نشده</string>
+    <string name="state_bt_off">بلوتوث خاموش</string>
+    <string name="pair_iphone">جفت کردن آیفون</string>
+    <string name="pair_hint">در برنامهٔ Cellular روی آیفون «جفت کردن» را بزنید و این کد را اسکن کنید. یک بار کار می‌کند و پس از ۵ دقیقه منقضی می‌شود.</string>
+    <string name="pair_expires">%1$d ثانیه تا انقضا</string>
+    <string name="unpair">لغو جفت</string>
+
+    <string name="step_permissions">مجوزها</string>
+    <string name="step_dialer">برنامه پیش‌فرض تلفن</string>
+    <string name="step_battery">مصرف باتری بدون محدودیت</string>
+    <string name="step_adb">اشکال‌زدایی بی‌سیم</string>
+    <string name="step_helper">دستیار صدا</string>
+    <string name="action_grant">اعطا</string>
+    <string name="action_set">تنظیم</string>
+    <string name="action_pair">جفت کردن</string>
+    <string name="action_start">شروع</string>
+    <string name="action_selftest">آزمون صدای تماس</string>
+    <string name="step_adb_tcp">اشکال‌زدایی TCP (اندروید ۱۰ یا بدون Wi-Fi)</string>
+    <string name="adb_tcp_on">روشن، درگاه %1$d</string>
+    <string name="adb_tcp_off">خاموش</string>
+    <string name="action_enable">فعال‌سازی</string>
+    <string name="action_turn_off">خاموش کردن</string>
+    <string name="adb_tcp_howto">یک بار گوشی را با USB به رایانه وصل کنید، دستور adb tcpip 5555 را اجرا کنید و پیام کلید را در گوشی بپذیرید (همیشه مجاز). سپس PolTell خودش به 127.0.0.1:5555 وصل می‌شود. پس از هر راه‌اندازی مجدد گوشی دستور adb tcpip را دوباره اجرا کنید. برای خاموش کردن: adb usb. تا وقتی روشن است، گوشی در هر شبکه‌ای که هست اتصال adb می‌پذیرد و فقط تأیید کلید از آن محافظت می‌کند.</string>
+    <string name="adb_tcp_connecting">در حال اتصال به adb روی 127.0.0.1…</string>
+    <string name="adb_tcp_connected">وصل شد. دستیار صدا در حال شروع است…</string>
+    <string name="adb_tcp_failed">اتصال به adb روی درگاه %1$d ممکن نشد. از رایانه دستور adb tcpip %1$d را اجرا کنید و پیام کلید را بپذیرید.</string>
+    <string name="done">انجام شد</string>
+    <string name="missing">لازم است</string>
+    <string name="helper_running">در حال اجرا (%1$s)</string>
+    <string name="helper_stopped">متوقف</string>
+    <string name="selftest_result">آزمون: %1$s</string>
+
+    <string name="adb_notif_title">جفت کردن اشکال‌زدایی بی‌سیم</string>
+    <string name="adb_notif_text">گزینه‌های برنامه‌نویس › اشکال‌زدایی بی‌سیم › جفت کردن دستگاه با کد را باز کنید و کد ۶ رقمی را اینجا وارد کنید.</string>
+    <string name="adb_notif_action">وارد کردن کد</string>
+    <string name="adb_notif_hint">کد جفت‌سازی</string>
+    <string name="adb_pairing">در حال جفت کردن…</string>
+    <string name="adb_paired">با اشکال‌زدایی بی‌سیم جفت شد. دستیار صدا در حال شروع است…</string>
+    <string name="call_ongoing">تماس در جریان است</string>
+    <string name="call_decline">رد کردن</string>
+    <string name="call_answer">پاسخ</string>
+    <string name="call_end">پایان تماس</string>
+    <string name="adb_failed">جفت کردن ناموفق بود: %1$s</string>
+
+    <string name="call_incoming">تماس ورودی</string>
+    <string name="call_outgoing">در حال تماس…</string>
+    <string name="call_active">در تماس</string>
+    <string name="call_holding">در انتظار</string>
+    <string name="call_ended">تماس پایان یافت</string>
+    <string name="answer">پاسخ</string>
+    <string name="decline">رد</string>
+    <string name="end_call">پایان</string>
+    <string name="speaker">بلندگو</string>
+    <string name="unknown_caller">ناشناس</string>
+    <string name="dial">تماس</string>
+    <string name="dialer_hint">شماره</string>
+    <string name="unpair_confirm_named">%1$s فراموش شود؟ باید دوباره جفت شود.</string>
+    <string name="audio_needs_android11">صدای تماس به اندروید ۱۱ یا جدیدتر نیاز دارد. روی این گوشی تماس‌ها همچنان از آیفون پاسخ داده، گرفته و قطع می‌شوند، اما صدایشان روی همین گوشی می‌ماند.</string>
+    <string name="audio_android11_12">صدای تماس در اندروید ۱۱ و ۱۲ از مسیر ضبط تماس گوشی استفاده می‌کند و فقط اگر گوشی اجازه بدهد کار می‌کند. برای بررسی، در حین تماس آزمون خودکار را اجرا کنید.</string>
+    <string name="audio_needs_android13">صدای تماس به اندروید ۱۳ یا جدیدتر نیاز دارد. روی این گوشی تماس‌ها همچنان از آیفون پاسخ داده، گرفته و قطع می‌شوند، اما صدایشان روی همین گوشی می‌ماند.</string>
+    <string name="audio_local_stays_on">در تماسی که به آیفون وصل است، گوشی و میکروفون خود این گوشی ممکن است روشن بمانند (فقط گوشی‌های سامسونگ اجازهٔ بی‌صدا کردنشان را می‌دهند): آن را در کیف یا جیب نگه دارید.</string>
+</resources>

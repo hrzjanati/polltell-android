@@ -1,0 +1,49 @@
+# Runs the automatic checks on every push and pull request: the same ones as tools/test-all.sh for this repository (except the privacy
+# scan's local-config values, which CI does not have). On-device checks are manual: tools/device-test.sh.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android (A54 app, helper, core, client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Unit tests, lint, release builds
+        working-directory: android
+        run: >
+          ./gradlew --console=plain
+          :core:testDebugUnitTest :app:testDebugUnitTest :helper:testDebugUnitTest :client:testDebugUnitTest
+          :app:lintRelease :client:lintRelease
+          :app:assembleRelease :helper:assembleRelease :client:assembleRelease
+      - name: Test reports
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: android-test-reports
+          path: android/*/build/reports/
+
+  hygiene:
+    name: Whitespace, scripts, privacy patterns
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - run: git diff --check $(git hash-object -t tree /dev/null) HEAD -- . ':!ios/TetherCore/Sources/COpus'
+      - run: sh -n tools/dbg.sh && sh -n tools/lib.sh && sh -n tools/start-helper.sh
+      - run: sudo apt-get install -y zsh >/dev/null && zsh -n tools/device-test.sh && zsh -n tools/test-all.sh
+      - run: zsh tools/check-private.sh --all

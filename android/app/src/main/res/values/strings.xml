@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PolTell</string>
+    <string name="dialer_label">PolTell phone</string>
+    <string name="channel_link">Link</string>
+    <string name="channel_calls">Calls</string>
+    <string name="channel_setup">Setup</string>
+    <string name="channel_find">Find my phone</string>
+    <string name="find_title">Ringing: find my phone</string>
+    <string name="find_text">Unlock the phone or tap Stop</string>
+    <string name="find_stop">Stop</string>
+    <string name="notif_link_waiting">Waiting for iPhone</string>
+    <string name="notif_link_connected">Connected to iPhone</string>
+    <string name="notif_link_unpaired">Not paired. Open PolTell to pair.</string>
+    <string name="notif_bt_off">Bluetooth is off</string>
+
+    <string name="section_link">iPhone link</string>
+    <string name="section_setup">Setup</string>
+    <string name="section_audio">Call audio</string>
+    <string name="state_connected">Connected</string>
+    <string name="state_waiting">Advertising, waiting for iPhone</string>
+    <string name="state_unpaired">Not paired</string>
+    <string name="state_bt_off">Bluetooth off</string>
+    <string name="pair_iphone">Pair iPhone</string>
+    <string name="pair_hint">In Cellular on the iPhone, choose Pair and scan this code. It works once and expires in 5 minutes.</string>
+    <string name="pair_expires">Expires in %1$d s</string>
+    <string name="unpair">Unpair</string>
+
+    <string name="step_permissions">Permissions</string>
+    <string name="step_dialer">Default phone app</string>
+    <string name="step_battery">Unrestricted battery use</string>
+    <string name="step_adb">Wireless debugging</string>
+    <string name="step_helper">Audio helper</string>
+    <string name="action_grant">Grant</string>
+    <string name="action_set">Set</string>
+    <string name="action_pair">Pair</string>
+    <string name="action_start">Start</string>
+    <string name="action_selftest">Run call-audio self-test</string>
+    <string name="step_adb_tcp">TCP debugging (Android 10, or no Wi-Fi)</string>
+    <string name="adb_tcp_on">On, port %1$d</string>
+    <string name="adb_tcp_off">Off</string>
+    <string name="action_enable">Enable</string>
+    <string name="action_turn_off">Turn off</string>
+    <string name="adb_tcp_howto">Connect this phone to a computer with USB once, run: adb tcpip 5555, and accept the key prompt on the phone (Always allow). PolTell then connects to 127.0.0.1:5555 itself. Repeat the adb tcpip command after every restart of the phone. Turn it off again with: adb usb. While it is on, the phone accepts adb connections on every network it is on, protected only by that key approval.</string>
+    <string name="adb_tcp_connecting">Connecting to adb on 127.0.0.1…</string>
+    <string name="adb_tcp_connected">Connected. Starting the audio helper…</string>
+    <string name="adb_tcp_failed">Could not connect to adb on port %1$d. Run adb tcpip %1$d from a computer and accept the key prompt.</string>
+    <string name="done">Done</string>
+    <string name="missing">Needed</string>
+    <string name="helper_running">Running (%1$s)</string>
+    <string name="helper_stopped">Stopped</string>
+    <string name="selftest_result">Self-test: %1$s</string>
+
+    <string name="adb_notif_title">Wireless debugging pairing</string>
+    <string name="adb_notif_text">Open Developer options › Wireless debugging › Pair device with pairing code, then type the 6-digit code here.</string>
+    <string name="adb_notif_action">Enter code</string>
+    <string name="adb_notif_hint">Pairing code</string>
+    <string name="adb_pairing">Pairing…</string>
+    <string name="adb_paired">Paired with Wireless debugging. Starting the audio helper…</string>
+    <string name="call_ongoing">Call in progress</string>
+    <string name="call_decline">Decline</string>
+    <string name="call_answer">Answer</string>
+    <string name="call_end">End call</string>
+    <string name="adb_failed">Pairing failed: %1$s</string>
+
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_outgoing">Calling…</string>
+    <string name="call_active">On call</string>
+    <string name="call_holding">On hold</string>
+    <string name="call_ended">Call ended</string>
+    <string name="answer">Answer</string>
+    <string name="decline">Decline</string>
+    <string name="end_call">End</string>
+    <string name="speaker">Speaker</string>
+    <string name="unknown_caller">Unknown</string>
+    <string name="dial">Call</string>
+    <string name="dialer_hint">Number</string>
+    <string name="unpair_confirm_named">Forget %1$s? It will need to be paired again.</string>
+    <string name="audio_needs_android11">Call audio needs Android 11 or later. On this phone, calls are still answered, placed and ended from the iPhone, but their audio stays on this phone.</string>
+    <string name="audio_android11_12">Call audio on Android 11 and 12 uses the phone\'s call recorder path and works only if this phone allows it. Run the self-test during a call to check.</string>
+    <string name="audio_needs_android13">Call audio needs Android 13 or later. On this phone, calls are still answered, placed and ended from the iPhone, but their audio stays on this phone.</string>
+    <string name="audio_local_stays_on">During a bridged call this phone\'s own earpiece and microphone may stay on (only Samsung phones let PolTell mute them): keep it in a bag or pocket.</string>
+</resources>
