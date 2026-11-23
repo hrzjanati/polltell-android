@@ -984,7 +984,13 @@ class Hub(private val app: TetherApp) : ConnectionListener {
          * the injected uplink).
          */
         private fun muteLocalMic(on: Boolean) {
-            if (!app.prefs.getBoolean("mute_local_mic", true)) return
+            // Off by default: on some phones (MediaTek; Samsung Galaxy Z Fold5 on Android 17) Telecom's mic mute also
+            // silences the injected uplink, so the far end heard nothing from the iPhone. The helper's per-vendor
+            // silencing still keeps the Android phone's own mic out where the phone allows it.
+            if (!app.prefs.getBoolean("mute_local_mic", false)) {
+                if (!on && CallRegistry.isMuted()) CallRegistry.mute(false)
+                return
+            }
             // Where the Android mic mute also mutes the injected uplink (MediaTek), the helper silences the mic its own
             // way and says so: then the phone's mic is never muted through Telecom (the far end would hear nothing).
             val want = on && helper.lastInfo?.optBoolean("telecomMicMute", true) != false

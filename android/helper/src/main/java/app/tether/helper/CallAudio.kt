@@ -417,8 +417,12 @@ object CallAudio {
     val silence: Silence by lazy { System.getenv("TETHER_SILENCE")?.let { e -> Silence.entries.firstOrNull { it.name.equals(e, true) } } ?: pickSilence(Build.MANUFACTURER, socManufacturer(), prop("ro.board.platform"), prop("ro.hardware")) }
 
     fun pickSilence(manufacturer: String?, soc: String?, platform: String?, hardware: String?): Silence {
-        if (manufacturer.equals("samsung", ignoreCase = true)) return Silence.SAMSUNG
         val s = (soc ?: "").lowercase(); val p = (platform ?: "").lowercase(); val h = (hardware ?: "").lowercase()
+        val qualcomm = s == "qti" || s.contains("qualcomm") || h == "qcom" ||
+            Regex("^(msm|sdm|sm|apq|qcs|lahaina|kona|taro|kalama|pineapple|sun|lito|bengal|holi|trinket|atoll|parrot|crow|blair)").containsMatchIn(p)
+        // Samsung's own tx/rx switches silence the injected uplink too on Samsung phones with Qualcomm chips
+        // (Galaxy Z Fold5, Android 17: the far end heard nothing). There only the voice-call stream is muted.
+        if (manufacturer.equals("samsung", ignoreCase = true)) return if (qualcomm) Silence.QUALCOMM else Silence.SAMSUNG
         return when {
             s.contains("mediatek") || p.startsWith("mt") || h.startsWith("mt") -> Silence.MEDIATEK
             s == "qti" || s.contains("qualcomm") || h == "qcom" ||

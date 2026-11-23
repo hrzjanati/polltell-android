@@ -10,7 +10,7 @@ import org.junit.Test
 class SilenceTest {
     @Test fun samsungAlwaysUsesItsOwnKeys() {
         assertEquals(Silence.SAMSUNG, CallAudio.pickSilence("samsung", "Samsung", "s5e8835", "s5e8835"))
-        assertEquals(Silence.SAMSUNG, CallAudio.pickSilence("samsung", "QTI", "kalama", "qcom"))
+        assertEquals(Silence.QUALCOMM, CallAudio.pickSilence("samsung", "QTI", "kalama", "qcom"))   // Samsung on Qualcomm: Samsung's switches also silence the injected uplink
     }
 
     @Test fun qualcommFromSocOrPlatform() {
