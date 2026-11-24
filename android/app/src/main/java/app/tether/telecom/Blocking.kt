@@ -3,7 +3,7 @@ package app.tether.telecom
 import android.telecom.Call
 import android.telecom.CallScreeningService
 import android.util.Log
-import app.tether.TetherApp
+import app.tether.PolTellApp
 
 /**
  * Rejects calls from blocked numbers before they ring anywhere (Android phone, iPhone, Mac). Telecom binds the default
@@ -14,7 +14,7 @@ class TetherScreeningService : CallScreeningService() {
     override fun onScreenCall(details: Call.Details) {
         val num = details.handle?.schemeSpecificPart ?: ""
         val blocked = details.callDirection == Call.Details.DIRECTION_INCOMING &&
-            runCatching { (application as TetherApp).lists.isBlocked(num) }.getOrDefault(false)
+            runCatching { (application as PolTellApp).lists.isBlocked(num) }.getOrDefault(false)
         if (blocked) Log.i(CallRegistry.TAG, "screening: blocked caller rejected")
         respondToCall(details, CallResponse.Builder()
             .setDisallowCall(blocked).setRejectCall(blocked).setSkipNotification(blocked)

@@ -41,12 +41,12 @@
         tools:ignore="ProtectedPermissions" />
 
     <application
-        android:name=".TetherApp"
+        android:name=".PolTellApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Tether"
+        android:theme="@style/Theme.PolTell"
         tools:targetApi="36">
 
         <activity

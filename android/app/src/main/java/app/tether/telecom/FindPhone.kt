@@ -14,7 +14,7 @@ import android.media.RingtoneManager
 import android.os.Handler
 import android.os.Looper
 import app.tether.R
-import app.tether.TetherApp
+import app.tether.PolTellApp
 
 /**
  * "Find my phone": rings loudly on the alarm stream for at most 30 s, then puts the alarm volume back.
@@ -96,7 +96,7 @@ class FindPhone(private val ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (!on) { nm.cancel(NOTIF_ID); return }
         val stop = PendingIntent.getBroadcast(ctx, 0, Intent(ACTION_STOP).setPackage(ctx.packageName), PendingIntent.FLAG_IMMUTABLE)
-        nm.notify(NOTIF_ID, Notification.Builder(ctx, TetherApp.CH_FIND).setSmallIcon(R.drawable.ic_tether)
+        nm.notify(NOTIF_ID, Notification.Builder(ctx, PolTellApp.CH_FIND).setSmallIcon(R.drawable.ic_polltell)
             .setContentTitle(ctx.getString(R.string.find_title)).setContentText(ctx.getString(R.string.find_text))
             .setOngoing(true).setCategory(Notification.CATEGORY_ALARM)
             .addAction(Notification.Action.Builder(null, ctx.getString(R.string.find_stop), stop).build()).build())

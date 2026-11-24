@@ -1,14 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Dark first: these are the colors in both day and night mode. -->
+<!-- Dark first: these are the colors in both day and night mode. Brand = a purple gradient, secondary = teal. -->
 <resources>
-    <color name="accent">#2FD3BE</color>
-    <color name="background">#0B0F10</color>
-    <color name="surface">#161C1D</color>
-    <color name="text">#ECF2F1</color>
-    <color name="muted">#8E9A98</color>
+    <color name="brand_start">#B18CFF</color>
+    <color name="brand_mid">#8B5CF6</color>
+    <color name="brand_end">#5B2BD9</color>
+    <color name="accent">#B79CFF</color>
+    <color name="on_brand">#FFFFFF</color>
+    <color name="secondary">#2FD3BE</color>
+    <color name="background">#0E0B16</color>
+    <color name="surface">#1A1626</color>
+    <color name="surface_stroke">#2A2440</color>
+    <color name="text">#F2EFFA</color>
+    <color name="muted">#9A94AD</color>
     <color name="ok">#4CD787</color>
     <color name="warn">#F0B03F</color>
     <color name="bad">#FF5F57</color>
-    <color name="icon_bg">#0E1314</color>
+    <color name="icon_bg">#14101F</color>
     <bool name="light_bars">false</bool>
 </resources>

@@ -13,6 +13,12 @@ Brings in Tether 1.1.0 (the sections below) under the PolTell name and bridge ic
 
 ## Unreleased
 
+- Android app: a purple-gradient look (teal secondary) with a new purple app icon; the screen is now built from a
+  ViewModel and a plain `MainUiState` (unit-tested), keeps clear of the status and navigation bars on Android 15,
+  uses 48 dp touch targets, and no longer upper-cases or letter-spaces Persian headings.
+- Renamed `TetherApp` to `PolTellApp` and the `Theme.Tether` style to `Theme.PolTell`; the package and application
+  id stay `app.tether` so existing installs and pairings keep working.
+
 ## 1.1.0 — 2026-11-23
 
 ### New features

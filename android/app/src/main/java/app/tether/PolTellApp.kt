@@ -12,7 +12,7 @@ import app.tether.link.Hub
 import app.tether.link.Keys
 import app.tether.telecom.CallRegistry
 
-class TetherApp : Application() {
+class PolTellApp : Application() {
     lateinit var keys: Keys; private set
     lateinit var sms: SmsRepo; private set
     lateinit var contacts: ContactsRepo; private set

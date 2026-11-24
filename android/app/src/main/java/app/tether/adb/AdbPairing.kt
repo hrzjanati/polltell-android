@@ -11,7 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import app.tether.R
-import app.tether.TetherApp
+import app.tether.PolTellApp
 
 /**
  * Pairing with Wireless debugging from the notification's code field (issue #1: "it cannot connect and the app
@@ -54,7 +54,7 @@ object AdbPairing {
 
     /** Runs the whole flow (on a background thread): pair, remember it, grant ourselves what we need, start the helper. */
     fun run(ctx: Context, code: String): Pair<Result, String?> {
-        val app = ctx.applicationContext as TetherApp
+        val app = ctx.applicationContext as PolTellApp
         val adb = try { Adb.get(app) } catch (t: Throwable) { return Result.FAILED to shortReason(t) }
         val found = try { adb.findPairingService() } catch (t: Throwable) { null }
             ?: return (if (onWifi(app)) Result.NO_SERVICE else Result.NO_WIFI) to null
@@ -109,7 +109,7 @@ class AdbPairingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val n = Notification.Builder(this, TetherApp.CH_SETUP).setSmallIcon(R.drawable.ic_tether)
+        val n = Notification.Builder(this, PolTellApp.CH_SETUP).setSmallIcon(R.drawable.ic_polltell)
             .setContentTitle(getString(R.string.adb_notif_title)).setContentText(getString(R.string.adb_pairing)).setOngoing(true).build()
         try {
             if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIF_WORK, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE)

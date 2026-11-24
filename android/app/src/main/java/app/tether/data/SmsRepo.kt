@@ -14,7 +14,7 @@ import android.provider.Telephony
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import android.util.Log
-import app.tether.TetherApp
+import app.tether.PolTellApp
 import app.tether.core.Sms
 
 /** Reads the SMS provider (read-only) and sends through SmsManager. */
@@ -179,7 +179,7 @@ class SmsRepo(private val ctx: Context) {
         val mgr = try {
             val base = if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(SmsManager::class.java)
                 else @Suppress("DEPRECATION") SmsManager.getDefault()
-            val subId = (ctx.applicationContext as TetherApp).sims.resolveSub(sub, forSms = true)
+            val subId = (ctx.applicationContext as PolTellApp).sims.resolveSub(sub, forSms = true)
                 ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
             if (subId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
                 if (Build.VERSION.SDK_INT >= 31) base.createForSubscriptionId(subId)
@@ -218,7 +218,7 @@ class SmsRepo(private val ctx: Context) {
 /** SMS_RECEIVED: nudge the provider poll (the observer also fires). */
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val app = context.applicationContext as TetherApp
+        val app = context.applicationContext as PolTellApp
         val pending = goAsync()
         Thread {
             try {
@@ -244,7 +244,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
             if (resultCode != android.app.Activity.RESULT_OK) failedParts.add(key)
             return
         }
-        val app = context.applicationContext as TetherApp
+        val app = context.applicationContext as PolTellApp
         val ok = resultCode == android.app.Activity.RESULT_OK && !failedParts.remove(key)
         val state = when {
             !ok -> "failed"

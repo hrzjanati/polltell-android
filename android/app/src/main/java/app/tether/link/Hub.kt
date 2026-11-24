@@ -3,7 +3,7 @@ package app.tether.link
 import app.tether.core.LinkPolicy
 import android.os.SystemClock
 import android.util.Log
-import app.tether.TetherApp
+import app.tether.PolTellApp
 import app.tether.adb.Adb
 import app.tether.audio.CallAudioReport
 import app.tether.audio.HelperBridge
@@ -38,7 +38,7 @@ import java.util.concurrent.TimeUnit
 import app.tether.core.Phone as PhoneEntry
 
 /** Routes everything between the iPhone link, the phone's data, calls and call audio. */
-class Hub(private val app: TetherApp) : ConnectionListener {
+class Hub(private val app: PolTellApp) : ConnectionListener {
     companion object {
         const val TAG = "Tether"
         const val PAGE_WEIGHT = 12_000

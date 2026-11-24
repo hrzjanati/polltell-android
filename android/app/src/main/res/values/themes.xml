@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Tether" parent="@android:style/Theme.DeviceDefault">
+    <style name="Theme.PolTell" parent="@android:style/Theme.DeviceDefault">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:colorAccent">@color/accent</item>

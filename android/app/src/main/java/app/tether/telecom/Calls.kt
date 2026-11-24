@@ -19,7 +19,7 @@ import android.telecom.TelecomManager
 import android.telecom.VideoProfile
 import android.util.Log
 import app.tether.R
-import app.tether.TetherApp
+import app.tether.PolTellApp
 import app.tether.core.CallInfo
 import app.tether.ui.CallActivity
 import java.util.UUID
@@ -41,7 +41,7 @@ object CallRegistry {
     private val listeners = CopyOnWriteArrayList<(CallInfo) -> Unit>()
     @Volatile var service: TetherInCallService? = null
     private val main = Handler(Looper.getMainLooper())
-    lateinit var app: TetherApp
+    lateinit var app: PolTellApp
 
     fun addListener(l: (CallInfo) -> Unit) { listeners.add(l) }
 
@@ -188,7 +188,7 @@ class TetherInCallService : InCallService() {
         }
         // Last line of defence for blocked callers (screening normally stops them first): no ring, no forwarding.
         if (call.stateCompat() in setOf(Call.STATE_NEW, Call.STATE_RINGING) && d.callDirection != Call.Details.DIRECTION_OUTGOING &&
-            runCatching { (application as TetherApp).lists.isBlocked(d.handle?.schemeSpecificPart ?: "") }.getOrDefault(false)) {
+            runCatching { (application as PolTellApp).lists.isBlocked(d.handle?.schemeSpecificPart ?: "") }.getOrDefault(false)) {
             Log.i(CallRegistry.TAG, "blocked caller: rejected without ringing")
             call.reject(false, null)
             return
@@ -218,8 +218,8 @@ class TetherInCallService : InCallService() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
         val person = Person.Builder().setName(info.name ?: info.num.ifEmpty { getString(R.string.unknown_caller) })
             .setImportant(true).build()
-        val b = Notification.Builder(this, TetherApp.CH_CALLS)
-            .setSmallIcon(R.drawable.ic_tether)
+        val b = Notification.Builder(this, PolTellApp.CH_CALLS)
+            .setSmallIcon(R.drawable.ic_polltell)
             .setContentIntent(open)
             .setFullScreenIntent(open, true)
             .setCategory(Notification.CATEGORY_CALL)

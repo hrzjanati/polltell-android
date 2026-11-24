@@ -7,7 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import app.tether.TetherApp
+import app.tether.PolTellApp
 import app.tether.helper.MicPath
 import app.tether.core.AudioFrame
 import app.tether.core.CentralHandshake
@@ -36,7 +36,7 @@ class DebugReceiver : BroadcastReceiver() {
     private fun isTestNumber(n: String) = TestGuards.isTestNumber(n)
 
     override fun onReceive(context: Context, intent: Intent) {
-        val app = context.applicationContext as TetherApp
+        val app = context.applicationContext as PolTellApp
         val cmd = intent.getStringExtra("cmd") ?: "state"
         val pending = goAsync()
         Thread {
@@ -55,7 +55,7 @@ class DebugReceiver : BroadcastReceiver() {
     }
 
     /** x.tether.echo to every client that announced it: round trip, clock offset and transport per answer. */
-    private fun extEcho(app: TetherApp, data: String?): String {
+    private fun extEcho(app: PolTellApp, data: String?): String {
         val echo = app.hub.extensions.extensions.filterIsInstance<app.tether.core.ext.EchoExtension>().firstOrNull() ?: return "echo not registered"
         val results = LinkedBlockingQueue<app.tether.core.ext.EchoExtension.Result>()
         echo.onResult = { results.put(it) }
@@ -68,7 +68,7 @@ class DebugReceiver : BroadcastReceiver() {
         } finally { echo.onResult = null }
     }
 
-    private fun run(app: TetherApp, cmd: String, intent: Intent): String = when (cmd) {
+    private fun run(app: PolTellApp, cmd: String, intent: Intent): String = when (cmd) {
         "state" -> (LinkService.running?.debugState() ?: JSONObject().put("service", false))
             .put("status", app.hub.statusJson().also { st ->
                 // The SIMs' own numbers never go to logcat or a terminal.
@@ -264,7 +264,7 @@ class DebugReceiver : BroadcastReceiver() {
      * Pairs an in-process fake central over an in-memory transport, runs sync and a dry-run SMS send,
      * then restores the real pairing. Exercises Connection/Hub/repos exactly as the iPhone would.
      */
-    private fun loopback(app: TetherApp): String {
+    private fun loopback(app: PolTellApp): String {
         val saved = app.keys.snapshot()
         val wasDry = Hub.dryRun
         Hub.dryRun = true
@@ -318,7 +318,7 @@ class DebugReceiver : BroadcastReceiver() {
      * Fake iPhone + fake line: ring, expect call.state ringing, answer from the "iPhone", expect active and
      * audio.start, exchange audio frames both ways, end from the "iPhone", expect ended and audio.stop.
      */
-    private fun loopbackCall(app: TetherApp, ringDuringSync: Boolean = false, mode: String = "answer"): String {
+    private fun loopbackCall(app: PolTellApp, ringDuringSync: Boolean = false, mode: String = "answer"): String {
         val saved = app.keys.snapshot()
         val log = StringBuilder()
         val pipe = MemoryTransport()
@@ -471,7 +471,7 @@ class DebugReceiver : BroadcastReceiver() {
      * Two fake clients ("Test A", "Test B") on the fake line, the real iPhone/Mac untouched: both ring; A answers
      * and gets the audio while B is told `elsewhere`; B sends call.take and the audio moves to B; B hangs up.
      */
-    private fun loopbackHandover(app: TetherApp): String {
+    private fun loopbackHandover(app: PolTellApp): String {
         val saved = app.keys.snapshot()
         val log = StringBuilder()
         class Fake(val name: String) {

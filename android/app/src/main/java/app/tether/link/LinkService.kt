@@ -19,7 +19,7 @@ import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
 import app.tether.R
-import app.tether.TetherApp
+import app.tether.PolTellApp
 import app.tether.adb.Adb
 import app.tether.telecom.TestConnectionService
 import app.tether.ui.MainActivity
@@ -27,13 +27,13 @@ import org.json.JSONObject
 
 /** Foreground service that keeps the BLE peripheral and the hub alive. */
 class LinkService : Service() {
-    private lateinit var app: TetherApp
+    private lateinit var app: PolTellApp
     private var ble: BlePeripheral? = null
     private val uiListener: () -> Unit = { updateNotification() }
 
     override fun onCreate() {
         super.onCreate()
-        app = application as TetherApp
+        app = application as PolTellApp
         startForeground(NOTIF_LINK, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         running = this
         app.hub.startBackground()
@@ -178,8 +178,8 @@ class LinkService : Service() {
             else -> getString(R.string.notif_link_waiting)
         }
         val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        return Notification.Builder(this, TetherApp.CH_LINK)
-            .setSmallIcon(R.drawable.ic_tether)
+        return Notification.Builder(this, PolTellApp.CH_LINK)
+            .setSmallIcon(R.drawable.ic_polltell)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setContentIntent(pi)

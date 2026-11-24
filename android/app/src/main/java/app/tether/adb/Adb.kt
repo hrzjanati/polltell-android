@@ -11,7 +11,7 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import app.tether.R
-import app.tether.TetherApp
+import app.tether.PolTellApp
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import io.github.muntashirakon.adb.android.AdbMdns
 import org.bouncycastle.asn1.x500.X500Name
@@ -85,7 +85,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
     @Synchronized fun ensureConnected(): Boolean {
         if (isConnected) return true
-        val prefs = (ctx as? TetherApp)?.prefs
+        val prefs = (ctx as? PolTellApp)?.prefs
         val legacy = prefs?.getBoolean(PREF_LEGACY, false) ?: false
         val port = prefs?.getInt(PREF_LEGACY_PORT, ConnectOrder.DEFAULT_LEGACY_PORT) ?: ConnectOrder.DEFAULT_LEGACY_PORT
         val how = connectInOrder(object : AdbEndpoints {
@@ -189,8 +189,8 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val action = Notification.Action.Builder(null, ctx.getString(R.string.adb_notif_action), pi)
                 .addRemoteInput(input).build()
-            val n = Notification.Builder(ctx, TetherApp.CH_SETUP)
-                .setSmallIcon(R.drawable.ic_tether)
+            val n = Notification.Builder(ctx, PolTellApp.CH_SETUP)
+                .setSmallIcon(R.drawable.ic_polltell)
                 .setContentTitle(ctx.getString(R.string.adb_notif_title))
                 .setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text))
@@ -202,7 +202,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
         fun updateNotification(ctx: Context, text: String, done: Boolean) {
             if (!done) { showPairingNotification(ctx, text); return }
-            val n = Notification.Builder(ctx, TetherApp.CH_SETUP).setSmallIcon(R.drawable.ic_tether)
+            val n = Notification.Builder(ctx, PolTellApp.CH_SETUP).setSmallIcon(R.drawable.ic_polltell)
                 .setContentTitle(ctx.getString(R.string.adb_notif_title)).setContentText(text).setAutoCancel(true).build()
             ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_ADB, n)
         }

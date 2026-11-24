@@ -13,7 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import app.tether.R
-import app.tether.TetherApp
+import app.tether.PolTellApp
 import app.tether.telecom.CallRegistry
 
 /** Minimal on-device call screen (the phone usually lives in a bag; the iPhone is the real UI). */
@@ -30,8 +30,8 @@ class CallActivity : Activity() {
         super.onCreate(savedInstanceState)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setBackgroundColor(getColor(R.color.background))
-            setPadding(dp(24), dp(24), dp(24), dp(24))
         }
+        root.padForSystemBars(dp(24), dp(24), dp(24), dp(24))
         title = TextView(this).apply { textSize = 30f; setTextColor(getColor(R.color.text)); gravity = Gravity.CENTER }
         state = TextView(this).apply { textSize = 16f; setTextColor(getColor(R.color.muted)); gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(40)) }
         buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -63,7 +63,7 @@ class CallActivity : Activity() {
         val info = CallRegistry.info(call)
         if (info.name == null && info.num.isNotEmpty() && lookedUp != info.num) {
             lookedUp = info.num
-            Thread { val n = (application as TetherApp).contacts.nameFor(info.num); main.post { lookedUpName = n } }.start()
+            Thread { val n = (application as PolTellApp).contacts.nameFor(info.num); main.post { lookedUpName = n } }.start()
         }
         title.text = info.name ?: lookedUpName ?: info.num.ifEmpty { getString(R.string.unknown_caller) }.let { if (info.num.isEmpty()) it else displayNumber(info.num) }
         state.text = getString(when (info.state) {
@@ -108,10 +108,11 @@ private fun Activity.displayNumber(n: String): String {
 class DialerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val app = application as TetherApp
+        val app = application as PolTellApp
         val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(48), dp(24), dp(24)); setBackgroundColor(getColor(R.color.background))
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(getColor(R.color.background))
         }
+        root.padForSystemBars(dp(24), dp(48), dp(24), dp(24))
         val number = EditText(this).apply {
             hint = getString(R.string.dialer_hint); textSize = 28f; inputType = android.text.InputType.TYPE_CLASS_PHONE
             setText(intent?.data?.schemeSpecificPart ?: "")
@@ -119,6 +120,7 @@ class DialerActivity : Activity() {
         val call = Button(this).apply {
             text = getString(R.string.dial); isAllCaps = false; setTextColor(Color.WHITE)
             background = GradientDrawable().apply { cornerRadius = dp(24).toFloat(); setColor(getColor(R.color.ok)) }
+            minHeight = dp(48)
             setOnClickListener { CallRegistry.dial(this@DialerActivity, number.text.toString(), null); finish() }
         }
         root.addView(number); root.addView(call)
