@@ -63,6 +63,12 @@ tested on the build machine only so far (against a simulated Android phone), not
 | Android phone | Android 10 or later with Bluetooth LE. **Call audio needs Android 13 or later** (Android 11-12: best effort, depends on the phone; Android 10: none); see [features by Android version](docs/devices/android-versions.md). PolTell becomes its default phone app. |
 | Build machine | JDK 17 and the Android SDK (platform 36). |
 
+### Which Android phone? · کدام گوشی؟
+
+**[docs/DEVICES.md](docs/DEVICES.md)** lists the phones confirmed to work (Galaxy A54, Galaxy Z Fold5), the phones on the
+Iranian market that very likely work (Samsung with Android 13+ and an Exynos or Snapdragon chip), the uncertain ones and
+those that do not. <span dir="rtl">فهرست کامل گوشی‌های سازگار و ناسازگار بازار ایران در [docs/DEVICES.md](docs/DEVICES.md).</span>
+
 ### Check a phone's call audio first
 
 `tools/call-audio-test.command` (double-click on a Mac, phone on USB) places one call from the Android phone,
