@@ -20,7 +20,8 @@ class ContractTest {
     private val received: Map<String, List<F>> = mapOf(
         "ping" to listOf(F("ts", K.INT, true)),
         "pong" to listOf(F("ts", K.INT, true)),
-        "sync" to listOf(F("sms", K.INT, true), F("calls", K.INT, true), F("contacts", K.STR, true), F("codecs", K.ARR), F("client", K.OBJ)),
+        "sync" to listOf(F("sms", K.INT, true), F("calls", K.INT, true), F("contacts", K.STR, true), F("codecs", K.ARR), F("client", K.OBJ),
+            F("caps", K.ARR)),
         "sms.send" to listOf(F("to", K.STR, true), F("body", K.STR, true), F("sub", K.INT)),
         "sms.read" to listOf(F("thread", K.INT, true), F("upTo", K.INT, true)),
         "sms.delete" to listOf(F("ids", K.ARR), F("thread", K.INT)),
@@ -38,24 +39,28 @@ class ContractTest {
         "call.dtmf" to listOf(F("cid", K.STR, true), F("d", K.STR, true)),
         "call.dial" to listOf(F("num", K.STR, true), F("sub", K.INT)),
         "selftest" to emptyList(),
+        "audio.set" to listOf(F("micMute", K.BOOL), F("mic", K.STR)),
         "net.get" to emptyList(),
         "net.set" to listOf(F("what", K.STR, true), F("on", K.BOOL, true), F("sub", K.INT), F("slot", K.INT), F("mode", K.STR)),
         "ussd.send" to listOf(F("code", K.STR, true), F("sub", K.INT)),
         "phone.find" to listOf(F("on", K.BOOL, true)),
         "ringer.set" to listOf(F("mode", K.STR, true)),
         "unpair" to emptyList(),
-        "error" to listOf(F("msg", K.STR, true)),
+        "error" to listOf(F("msg", K.STR, true), F("t", K.STR), F("code", K.STR)),
     )
 
     /** T constants with no fixture on purpose (none today). */
     private val noFixture = emptyMap<String, String>()
 
     private val dir = File(javaClass.classLoader!!.getResource("fixtures")!!.toURI())
-    private val fixtures: Map<String, JSONObject> = dir.listFiles { f -> f.name.endsWith(".json") }!!
+    private val allFixtures: Map<String, JSONObject> = dir.listFiles { f -> f.name.endsWith(".json") }!!
         .associate { f -> JSONObject(f.readText()).let { it.getString("t") to it } }
+    /** Core types (§5); extension fixtures (`x.…`, §7) are checked by the extension tests below. */
+    private val fixtures = allFixtures.filterKeys { !it.startsWith(Ext.PREFIX) }
+    private val extFixtures = allFixtures.filterKeys { it.startsWith(Ext.PREFIX) }
 
     private fun variants(t: String): Map<String, JSONObject> =
-        fixtures.getValue(t).getJSONObject("variants").let { v -> keysOf(v).associateWith { v.getJSONObject(it) } }
+        allFixtures.getValue(t).getJSONObject("variants").let { v -> keysOf(v).associateWith { v.getJSONObject(it) } }
 
     private fun tConstants(): Set<String> = T::class.java.declaredFields
         .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == String::class.java }
@@ -176,5 +181,73 @@ class ContractTest {
         assertEquals(T.STATUS, m.t); assertEquals(3, m.id); assertEquals(9, m.re); assertSame("status", b, m.b)
         // An old producer may leave out `b` for an empty body.
         assertEquals(0, Message.parse("""{"t":"audio.stop"}""".toByteArray()).b.length())
+    }
+
+    // ------------------------------------------------------------------ extensions (§7)
+
+    private class Link(override val transport: String) : app.tether.core.ext.ExtensionLink {
+        override val peerName = "Test iPhone"; override val peerKind = "iphone"
+        val sent = ArrayList<Message>()
+        override fun send(m: Message): Boolean { sent += m; return true }
+    }
+
+    @Test fun extensionFixturesAreExtensionTypesNamedInSection7() {
+        assertTrue("x.tether.echo" in extFixtures && "x.org.example.unknown" in extFixtures)
+        val text = javaClass.classLoader!!.getResource("PROTOCOL.md")!!.readText()
+        val sec7 = text.substringAfter("## 7. Extensions")
+        for ((t, f) in extFixtures) {
+            // Every extension type is a valid name in the namespace (an id, or an id and one more label).
+            assertTrue("$t is not a valid extension type", app.tether.core.ext.ExtensionRegistry.validId(t))
+            assertTrue("$t: dir", f.getString("dir") in setOf("both", "phone-to-client", "client-to-phone"))
+            assertTrue("$t is not named in PROTOCOL.md §7", "`$t`" in sec7)
+        }
+        assertTrue("no extension type in §5's table", protocolTypes().none { it.startsWith(Ext.PREFIX) })
+    }
+
+    @Test fun echoAnswersEveryRequestFixtureLikeTheReplyFixtures() {
+        val reply = variants(Ext.ECHO).getValue("reply")
+        val at = reply.getLong("at")
+        for ((name, b) in variants(Ext.ECHO).filterKeys { !it.startsWith("reply") }) {
+            val reg = app.tether.core.ext.ExtensionRegistry().apply { register(app.tether.core.ext.EchoExtension { at }); start() }
+            val link = Link("l2cap")
+            assertTrue(reg.route(link, Message.parse(Message(Ext.ECHO, b, id = 5).toJson())))
+            val out = Message.parse(link.sent.single().toJson())
+            assertEquals(Ext.ECHO, out.t); assertEquals(5, out.re)
+            val want = if (b.has("data")) reply else JSONObject(reply.toString()).apply { remove("data") }
+            assertSame("echo/$name", want, out.b)
+        }
+        // The answer's shape is the one the reply fixtures pin (an asker on any side reads these fields).
+        for ((name, b) in variants(Ext.ECHO).filterKeys { it.startsWith("reply") })
+            for (k in listOf("ts", "at")) assertEquals("$name.$k", K.INT, kindOf(b.get(k)))
+    }
+
+    @Test fun unknownExtensionIsRefusedWithTheErrorFixture() {
+        val reg = app.tether.core.ext.ExtensionRegistry().apply { register(app.tether.core.ext.EchoExtension()); start() }
+        val link = Link("gatt")
+        val b = variants("x.org.example.unknown").getValue("request")
+        assertTrue(reg.route(link, Message.parse(Message("x.org.example.unknown", b, id = 8).toJson())))
+        val err = Message.parse(link.sent.single().toJson())
+        assertEquals(T.ERROR, err.t); assertEquals(8, err.re)
+        assertSame("error/extension", variants(T.ERROR).getValue("extension"), err.b)
+        assertTrue("without an id: ignored, never answered", reg.route(link, Message("x.org.example.unknown", b)))
+        assertEquals(1, link.sent.size)
+    }
+
+    @Test fun capsInSyncAndStatusFixturesAgreeEcho() {
+        val reg = app.tether.core.ext.ExtensionRegistry().apply { register(app.tether.core.ext.EchoExtension()); start() }
+        val echo = reg.extensions.single()
+        for ((t, v) in listOf("sync" to "full", "sync" to "android", "status" to "full", "status" to "unknown")) {
+            val link = Link("l2cap")
+            reg.peerCaps(link, variants(t).getValue(v).getJSONArray(Ext.CAPS))
+            assertEquals("$t/$v", 1, reg.version(echo, link))
+        }
+        for (t in listOf("sync", "status")) {
+            val link = Link("l2cap")
+            reg.peerCaps(link, variants(t).getValue("old").optJSONArray(Ext.CAPS))
+            assertEquals("$t/old: an app from before extensions agrees nothing", null, reg.version(echo, link))
+        }
+        assertEquals(listOf("x.tether.echo/1"), reg.caps())
+        val ext = variants("status").getValue("full").getJSONObject(Ext.STATUS)
+        for (k in keysOf(ext)) assertTrue(k, app.tether.core.ext.ExtensionRegistry.validId(k))
     }
 }

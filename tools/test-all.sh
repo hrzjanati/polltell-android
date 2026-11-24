@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Runs every automatic check of the repository: the ones CI runs, plus the privacy scan. No phone is needed.
-#   tools/test-all.sh            everything (Android unit tests, lint, release builds)
-#   tools/test-all.sh --quick    Android unit tests only (about a minute)
+#   tools/test-all.sh            everything (Android, Swift package, iOS app build and its unit tests)
+#   tools/test-all.sh --quick    Android unit tests and the Swift package only (about a minute)
 #   tools/test-all.sh --no-ios   accepted for compatibility (the iPhone app lives in polltell-ios)
 # On-device checks (the Android phone's test line, the iPhone) are separate: tools/device-test.sh.
 # Needs: JDK 17 and the Android SDK; on a Mac also Xcode and XcodeGen. Set JAVA_HOME / DEVELOPER_DIR if they are not

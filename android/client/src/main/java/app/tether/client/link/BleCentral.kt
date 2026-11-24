@@ -145,6 +145,9 @@ class BleCentral(private val ctx: Context, private val identity: Identity, priva
 
     fun sendAudio(f: AudioFrame): Boolean = session?.takeIf { it.isUp }?.sendAudio(f) ?: false
 
+    /** A control message with its own `id` / `re` (extensions). */
+    fun sendMessage(m: Message): Boolean = session?.takeIf { it.isUp }?.sendMessage(m) ?: false
+
     /** The app came to the front without a session: start over now, forgetting the back-off. */
     fun appActive() = h.post {
         if (!identity.isPaired || session != null || settingUp) return@post

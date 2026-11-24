@@ -123,7 +123,7 @@ messages. PolTell does not record calls.
 
 ## Credits and licence
 
-PolTell is the [Tether](https://github.com/amirwmr/tether) project by the Tether authors, under a new name and icon
+PolTell is the [Tether](https://github.com/amirwmr/tether) project (currently Tether 1.1.0) by the Tether authors, under a new name and icon
 and split into an Android and an iPhone repository. The code is otherwise the same; the documentation in `docs/`
 still uses the original name "Tether" (the Android app id `app.tether.android`, the iOS target `Tether` and the
 `TetherCore` package keep their names). MIT, see [LICENSE](LICENSE); third-party components in [NOTICE](NOTICE).

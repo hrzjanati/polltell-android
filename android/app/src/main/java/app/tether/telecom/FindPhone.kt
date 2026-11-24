@@ -131,7 +131,7 @@ class RingerControl(private val ctx: Context) {
             ctx.getSystemService(AudioManager::class.java).ringerMode = m
             if (this.mode() != mode) "Android did not change the ringer (Do Not Disturb access may be needed)" else null
         } catch (e: SecurityException) {
-            "Do Not Disturb access is needed for $mode: allow Tether in Settings > Notifications > Do Not Disturb on the Android phone"
+            "Do Not Disturb access is needed for $mode: allow PolTell in Settings > Notifications > Do Not Disturb on the Android phone"
         } catch (t: Throwable) { t.message ?: t.javaClass.simpleName }
     }
 }

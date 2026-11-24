@@ -1,6 +1,10 @@
 .DS_Store
 .build/
 .swiftpm/
+# The Swift SDK is a library: its dependency versions are resolved by the package that uses it.
+/Package.resolved
+examples/swift/*/Package.resolved
+/build-sdk/
 *.xcuserstate
 xcuserdata/
 DerivedData/
@@ -16,6 +20,7 @@ ios/build-check/
 ios/build-sim/
 ios/build-gen/
 ios/build-test/
+ios/build-release/
 __pycache__/
 ios/build-sim-ent/
 

@@ -43,6 +43,12 @@ those two devices can read or inject anything on the link, and no third party is
 
 ## Reporting a vulnerability
 
-Please report security problems privately through GitHub's **Security › Report a vulnerability** on this
-repository, not in a public issue. Include the version, the devices and steps to reproduce. You will get an answer
-within a week; fixes are released as soon as they are ready, with credit if you want it.
+Please report security problems privately, not in a public issue: use GitHub's private vulnerability reporting
+(**Security › Report a vulnerability** on this repository, or
+[this link](https://github.com/amirwmr/tether/security/advisories/new)). Include the version, the devices and steps
+to reproduce, and leave out real phone numbers, keys and tokens. You will get an answer within a week; fixes are
+released as soon as they are ready, with a GitHub security advisory and credit if you want it.
+
+## Supported versions
+
+Fixes go into the latest release and `main`. Older releases are not patched; update to the latest one.

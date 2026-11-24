@@ -2,6 +2,7 @@ package app.tether.client.model
 
 import app.tether.core.CallEntry
 import app.tether.core.Contact
+import app.tether.core.Ext
 import app.tether.core.Phone
 import app.tether.core.Sms
 import app.tether.core.T
@@ -265,16 +266,18 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
 
     // ------------------------------------------------------------------ sync and texts
 
-    fun requestSync(full: Boolean = false, codecs: List<String>, kind: String, name: String) {
+    /** [caps]: the extensions this client speaks (protocol §7.2); left out of the sync when there are none. */
+    fun requestSync(full: Boolean = false, codecs: List<String>, kind: String, name: String, caps: List<String> = emptyList()) {
         if (!link.isConnected) return
         syncing = true
         incrementalSync = !full && sms.isNotEmpty()
         // From the last *completed* sync: a text that came in live during an interrupted sync must not make us skip the rest.
         val lastSms = if (full) 0 else smsSyncedUpTo ?: (sms.maxOfOrNull { it.id } ?: 0)
         val lastCall = if (full) 0 else recents.maxOfOrNull { it.id } ?: 0
-        lastSyncArgs = Triple(codecs, kind, name)
+        lastSyncArgs = Triple(codecs, kind, name); lastCaps = caps
         link.send(T.SYNC, JSONObject().put("sms", maxOf(0, lastSms)).put("calls", maxOf(0, lastCall)).put("contacts", if (full) "" else contactsVersion)
-            .put("codecs", JSONArray(codecs)).put("client", JSONObject().put("kind", kind).put("name", name)))
+            .put("codecs", JSONArray(codecs)).put("client", JSONObject().put("kind", kind).put("name", name))
+            .apply { if (caps.isNotEmpty()) put(Ext.CAPS, JSONArray(caps)) })
         // Conversations read while out of reach.
         for ((thread, upTo) in pendingRead) link.send(T.SMS_READ, JSONObject().put("thread", thread).put("upTo", upTo))
         pendingRead.clear()
@@ -282,7 +285,8 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
     }
 
     private var lastSyncArgs = Triple(listOf("pcmu"), "android", "Android")
-    private fun resync(full: Boolean = false) = requestSync(full, lastSyncArgs.first, lastSyncArgs.second, lastSyncArgs.third)
+    private var lastCaps = emptyList<String>()
+    private fun resync(full: Boolean = false) = requestSync(full, lastSyncArgs.first, lastSyncArgs.second, lastSyncArgs.third, lastCaps)
 
     fun sendSms(to: String, body: String, sub: Int?) {
         val text = body.trim()
@@ -331,9 +335,9 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
 
     // ------------------------------------------------------------------ link events
 
-    fun linkUp(codecs: List<String>, kind: String, name: String) {
+    fun linkUp(codecs: List<String>, kind: String, name: String, caps: List<String> = emptyList()) {
         problem = null
-        requestSync(false, codecs, kind, name)
+        requestSync(false, codecs, kind, name, caps)
         flushOutbox()
     }
 

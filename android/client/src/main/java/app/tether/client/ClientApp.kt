@@ -29,6 +29,9 @@ import app.tether.core.CallEntry
 import app.tether.core.Message
 import app.tether.core.PairingCode
 import app.tether.core.Sms
+import app.tether.core.ext.ExtensionLink
+import app.tether.core.ext.ExtensionRegistry
+import app.tether.client.ext.clientExtensions
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -47,6 +50,7 @@ class ClientApp : Application(), LinkEvents {
     lateinit var link: BleCentral; private set
     lateinit var state: ClientState; private set
     lateinit var calls: CallTracker; private set
+    lateinit var extensions: ExtensionRegistry; private set
     lateinit var audio: CallAudio; private set
     lateinit var telecom: TelecomBridge; private set
     lateinit var notifier: Notifier; private set
@@ -78,7 +82,19 @@ class ClientApp : Application(), LinkEvents {
         telecom = TelecomBridge(this)
         calls = CallTracker(port, telecom, nameOf = { state.name(it) }, schedule = { ms, b -> main.postDelayed(b, ms) })
         val codecs = if (runCatching { OpusCodec.available() }.getOrDefault(false)) listOf("opus", "pcmu") else listOf("pcmu")
-        core = ClientCore(state, calls, audio, ClientHello("android", deviceName(), codecs))
+        // Extensions (protocol §7, docs/EXTENDING.md): register yours here. Handlers run on the main thread.
+        extensions = ExtensionRegistry(log = { journal.add("ext: $it") }).apply {
+            for (e in clientExtensions()) runCatching { register(e) }.onFailure { journal.add("ext: not registered: ${it.message}") }
+            start()
+        }
+        val extLink = object : ExtensionLink {
+            override val peerName get() = identity.peerName ?: "Android phone"
+            override val peerKind = "phone"
+            override val transport get() = this@ClientApp.transport
+            override val inCall get() = calls.hasCalls
+            override fun send(m: Message) = link.sendMessage(m)
+        }
+        core = ClientCore(state, calls, audio, ClientHello("android", deviceName(), codecs), extensions, extLink)
         telecom.register()
         notifier.channels()
         // JIT-compile the Opus encoder/decoder now: cold, the first seconds of a call cost several times more per frame.

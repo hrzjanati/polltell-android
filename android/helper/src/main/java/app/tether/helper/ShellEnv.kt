@@ -73,5 +73,9 @@ object ShellEnv {
         override fun getAttributionSource(): AttributionSource =
             AttributionSource.Builder(2000).setPackageName(SHELL_PACKAGE).build()
         override fun getApplicationContext(): Context = this
+        // AudioManager.getMode() reports MODE_CALL_SCREENING as MODE_IN_CALL to apps targeting Android 10 or lower, and
+        // reads the target from here (the system context's says 0): the helper must see the real mode (MicPath).
+        override fun getApplicationInfo(): android.content.pm.ApplicationInfo =
+            android.content.pm.ApplicationInfo(super.getApplicationInfo()).apply { targetSdkVersion = android.os.Build.VERSION.SDK_INT }
     }
 }

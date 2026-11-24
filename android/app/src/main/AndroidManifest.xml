@@ -143,6 +143,11 @@
 
         <receiver android:name=".data.SmsStatusReceiver" android:exported="false" />
         <receiver android:name=".adb.AdbPairingReceiver" android:exported="false" />
+        <!-- Pairing with Wireless debugging, started from the notification's code field (a few seconds to a minute). -->
+        <service
+            android:name=".adb.AdbPairingService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
 
         <!-- Debug hooks for adb only (the DUMP permission is held by the shell, not by apps). -->
         <receiver

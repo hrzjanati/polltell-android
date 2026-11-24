@@ -266,6 +266,7 @@ object CallAudio {
         val o = JSONObject()
         o.put("sdk", Build.VERSION.SDK_INT).put("model", Build.MODEL).put("uid", android.os.Process.myUid())
         o.put("mode", am.mode).put("interceptable", isInterceptable()).put("silence", silence.name.lowercase())
+            .put("callScreeningMode", screeningSupported())
         o.put("outputs", devices(AudioManager.GET_DEVICES_OUTPUTS)).put("inputs", devices(AudioManager.GET_DEVICES_INPUTS))
         val caps = JSONArray()
         for (m in captureMethods + "voice_uplink") {
@@ -303,13 +304,14 @@ object CallAudio {
 
     /**
      * During a live call: play a 1 kHz tone with each inject method while capturing VOICE_UPLINK,
-     * and look for the tone with a Goertzel filter. A hit means the far end hears us.
+     * and look for the tone with a Goertzel filter. A hit means the far end hears us. [methods]: the inject methods to
+     * try (default all); [captures]: also try every capture method.
      */
-    fun selfTest(rate: Int = 16000): JSONObject {
+    fun selfTest(rate: Int = 16000, methods: List<String> = injectMethods, captures: Boolean = true): JSONObject {
         val res = JSONArray()
         var chosen: String? = null
         val frame = rate / 50
-        for (m in injectMethods) {
+        for (m in methods) {
             val r = JSONObject().put("name", "inject:$m")
             var inj: Inject? = null
             var cap: Capture? = null
@@ -345,7 +347,7 @@ object CallAudio {
             }
             res.put(r)
         }
-        for (m in captureMethods) {
+        for (m in if (captures) captureMethods else emptyList()) {
             val r = JSONObject().put("name", "capture:$m")
             try {
                 val c = openCapture(m, rate)
@@ -400,29 +402,25 @@ object CallAudio {
     /**
      * How this phone's own earpiece and microphone are silenced while a call is bridged (the downlink is still
      * captured, the injected uplink still goes out). Chosen per vendor from their audio HAL sources:
-     * - Samsung: its vendor parameters (the ones its Text Call feature sets), rx/tx control mode 1 = muted. Verified
-     *   on the reference phone.
-     * - Qualcomm: voice-call stream muted (HAL voice volume 0 sets the "Voice Rx Device Mute" mixer control); the
-     *   Android mic mute is safe there, because while the in-call music uplink is open the HAL mutes the mic device
-     *   only, not the mixed uplink (hardware/qcom/audio voice.c, voice_set_mic_mute).
+     * - Samsung: its vendor parameters (the ones its Text Call feature sets), rx/tx control mode 1 = muted. The rx
+     *   (earpiece) key is verified on the reference phone; the tx (microphone) key is used only when the user turns the
+     *   phone's mic mute on (see [LocalMutes]), since nobody heard a real call's uplink with it yet.
+     * - Qualcomm: voice-call stream muted (HAL voice volume 0 sets the "Voice Rx Device Mute" mixer control). Its HAL
+     *   has no microphone key; Android's mic mute (Telecom) mutes the whole Tx path unless the injection is the in-call
+     *   music use case (hardware/qcom/audio voice.c, voice_set_mic_mute), which the interception track is not.
      * - MediaTek: Set_SpeechCall_DL_Mute / Set_SpeechCall_UL_Mute (the UL key mutes the microphone source only). The
      *   Android mic mute must NOT be used: there it mutes the whole uplink, injected audio included.
-     * - Others (Google Tensor, unknown): voice-call stream muted; nothing for the mic that is known to keep the
-     *   injected audio, so the Android mic mute stays as before.
-     * Only the Samsung path is verified on a device; the others follow the vendors' sources and field reports.
+     * - Others (Google Tensor, unknown): voice-call stream muted; for the mic only Android's mic mute.
+     * [vendorMicKeys]: the vendor has its own microphone key (used instead of Android's mic mute when the user asks).
      */
-    enum class Silence(val telecomMicMuteSafe: Boolean) { SAMSUNG(true), QUALCOMM(true), MEDIATEK(false), OTHER(true) }
+    enum class Silence(val vendorMicKeys: Boolean) { SAMSUNG(true), QUALCOMM(false), MEDIATEK(true), OTHER(false) }
 
     /** Overridable for tests on one phone (`TETHER_SILENCE=qualcomm|mediatek|other|samsung` in the helper's environment). */
     val silence: Silence by lazy { System.getenv("TETHER_SILENCE")?.let { e -> Silence.entries.firstOrNull { it.name.equals(e, true) } } ?: pickSilence(Build.MANUFACTURER, socManufacturer(), prop("ro.board.platform"), prop("ro.hardware")) }
 
     fun pickSilence(manufacturer: String?, soc: String?, platform: String?, hardware: String?): Silence {
+        if (manufacturer.equals("samsung", ignoreCase = true)) return Silence.SAMSUNG
         val s = (soc ?: "").lowercase(); val p = (platform ?: "").lowercase(); val h = (hardware ?: "").lowercase()
-        val qualcomm = s == "qti" || s.contains("qualcomm") || h == "qcom" ||
-            Regex("^(msm|sdm|sm|apq|qcs|lahaina|kona|taro|kalama|pineapple|sun|lito|bengal|holi|trinket|atoll|parrot|crow|blair)").containsMatchIn(p)
-        // Samsung's own tx/rx switches silence the injected uplink too on Samsung phones with Qualcomm chips
-        // (Galaxy Z Fold5, Android 17: the far end heard nothing). There only the voice-call stream is muted.
-        if (manufacturer.equals("samsung", ignoreCase = true)) return if (qualcomm) Silence.QUALCOMM else Silence.SAMSUNG
         return when {
             s.contains("mediatek") || p.startsWith("mt") || h.startsWith("mt") -> Silence.MEDIATEK
             s == "qti" || s.contains("qualcomm") || h == "qcom" ||
@@ -446,41 +444,141 @@ object CallAudio {
         streamMuted = on
     }
 
-    /** Result of [localCallAudio]: what was done, and how silent the phone is ("full", "earpiece", "none"). */
-    data class Local(val note: String, val silent: String, val telecomMicMute: Boolean)
+    /** Result of [localCallAudio]: what was done, and whether every key was accepted. */
+    data class Local(val note: String, val ok: Boolean)
 
-    /** Mutes / restores the phone's own earpiece and microphone for a bridged call (see [Silence]). */
-    fun localCallAudio(muted: Boolean, errors: org.json.JSONArray): Local {
+    /**
+     * Mutes / restores the phone's own earpiece ([muted]) and, with [mic], its microphone through the vendor's own key
+     * (see [Silence]; where the vendor has none, the app mutes it through Telecom). [mic] is ignored without [muted].
+     */
+    fun localCallAudio(muted: Boolean, mic: Boolean, errors: org.json.JSONArray): Local {
         val v = if (muted) "1" else "0"
+        val m = if (muted && mic) "1" else "0"
         val mode = silence
         return try {
             when (mode) {
                 Silence.SAMSUNG -> {
                     am.setParameters("l_voice_rx_control_mode=$v")
-                    am.setParameters("l_voice_tx_control_mode=$v")
-                    Local("rx=$v tx=$v", "full", mode.telecomMicMuteSafe)
+                    am.setParameters("l_voice_tx_control_mode=$m")
+                    Local("samsung rx=$v tx=$m", true)
                 }
                 Silence.MEDIATEK -> {
                     am.setParameters("Set_SpeechCall_DL_Mute=$v")
-                    am.setParameters("Set_SpeechCall_UL_Mute=$v")
-                    Local("mediatek dl=$v ul=$v", "full", mode.telecomMicMuteSafe)
+                    am.setParameters("Set_SpeechCall_UL_Mute=$m")
+                    Local("mediatek dl=$v ul=$m", true)
                 }
                 Silence.QUALCOMM, Silence.OTHER -> {
                     // Unmute also when another helper process muted it (a crash mid-call): nobody else mutes this stream.
                     if (muted || streamMuted || am.isStreamMute(AudioManager.STREAM_VOICE_CALL)) muteVoiceStream(muted)
-                    Local("voice stream ${if (muted) "muted" else "restored"}",
-                        if (mode == Silence.QUALCOMM) "full" else "earpiece", mode.telecomMicMuteSafe)
+                    Local("voice stream ${if (muted) "muted" else "restored"}", true)
                 }
             }
         } catch (t: Throwable) {
-            errors.put("local mute ${describe(t)}"); Local("failed", "none", true)
+            errors.put("local mute ${describe(t)}"); Local("failed", false)
         }
+    }
+
+    /** Only the vendor's microphone key, for a running call (the uplink check undoing it, the user's setting changing). */
+    fun vendorMicMute(on: Boolean, errors: org.json.JSONArray): String? {
+        val m = if (on) "1" else "0"
+        return try {
+            when (silence) {
+                Silence.SAMSUNG -> { am.setParameters("l_voice_tx_control_mode=$m"); "samsung tx=$m" }
+                Silence.MEDIATEK -> { am.setParameters("Set_SpeechCall_UL_Mute=$m"); "mediatek ul=$m" }
+                else -> null
+            }
+        } catch (t: Throwable) {
+            errors.put("mic mute ${describe(t)}"); null
+        }
+    }
+
+    // ---------------------------------------------------------------- audio modes (MicPath)
+
+    fun audioMode(): Int = runCatching { am.mode }.getOrDefault(-1)
+
+    /** Whether the audio policy declares MODE_CALL_SCREENING (else AudioService ignores a request for it). */
+    fun screeningSupported(): Boolean = Build.VERSION.SDK_INT >= 30 && runCatching { am.isCallScreeningModeSupported }.getOrDefault(false)
+
+    /**
+     * Asks for audio mode [mode] as this process (the shell's MODIFY_PHONE_STATE makes the request privileged: the most
+     * recent one owns the mode) and waits up to [waitMs] for it; true when the phone is in it. [MicPath.Mode.NORMAL]
+     * withdraws our request, so the mode returns to Telecom's (and to it anyway when this process dies).
+     */
+    fun requestMode(mode: Int, waitMs: Long = 300): Boolean {
+        try { am.mode = mode } catch (t: Throwable) { ShellEnv.log("setMode($mode): ${describe(t)}"); return false }
+        if (mode == MicPath.Mode.NORMAL) return true
+        val end = System.currentTimeMillis() + waitMs
+        while (true) {
+            if (audioMode() == mode) return true
+            if (System.currentTimeMillis() > end) return false
+            Thread.sleep(10)
+        }
+    }
+
+    /** Samples in b[0 until n] that are not zero. */
+    fun nonZero(b: ShortArray, n: Int): Int { var c = 0; for (i in 0 until n) if (b[i].toInt() != 0) c++; return c }
+
+    /**
+     * Self-test of the redirect modes for the call in its own mode now: for each, the uplink's level with nothing
+     * injected (the phone's mic hearing the room), the injected tone and the downlink, first in the call's mode, then
+     * in the redirect mode; restored afterwards. The verdicts ([MicPath.selftestVerdict]) are remembered by the app.
+     */
+    fun redirectSelfTest(rate: Int = 16000): JSONObject {
+        val rows = JSONArray()
+        val verdicts = JSONObject()
+        val callMode = audioMode()
+        val ladder = if (Build.VERSION.SDK_INT >= FULL_SDK_AUDIO) MicPath.Redirect.ladder(callMode, screeningSupported()) else emptyList()
+        if (ladder.isEmpty()) rows.put(JSONObject().put("name", "mic:redirect").put("ok", false).put("note",
+            if (Build.VERSION.SDK_INT < FULL_SDK_AUDIO) "needs Android 13" else "not in a call's audio mode (${MicPath.Mode.name(callMode)})"))
+        for (r in ladder) {
+            val row = JSONObject().put("name", "mic:${r.wire}")
+            var up: Capture? = null; var down: Capture? = null; var inj: Inject? = null
+            try {
+                up = openCapture("voice_uplink", rate)
+                down = runCatching { openCapture("intercept", rate) }.getOrNull()
+                inj = openInject("intercept", rate)
+                val m0 = measure(up, down, inj, rate)
+                val accepted = requestMode(r.audioMode)
+                Thread.sleep(300)   // the policy re-routes the call
+                up.drain(rate); down?.drain(rate)
+                val m1 = if (accepted) measure(up, down, inj, rate) else m0
+                val (v, why) = MicPath.selftestVerdict(accepted, m0.downAlive, m1.downAlive, m0.tone, m1.tone, m0.floor, m1.floor)
+                verdicts.put(r.wire, v.wire)
+                row.put("ok", v.usable).put("verdict", v.wire).put("note", "%s: %s; mic floor %.0f → %.0f rms, tone %.1f → %.1f, downlink %s → %s".format(
+                    v.wire, why, m0.floor, m1.floor, m0.toneRatio, m1.toneRatio, if (m0.downAlive) "audio" else "silent", if (m1.downAlive) "audio" else "silent"))
+            } catch (t: Throwable) {
+                row.put("ok", false).put("note", describe(t))
+            } finally {
+                requestMode(MicPath.Mode.NORMAL)
+                inj?.stop(); down?.stop(); up?.stop()
+                Thread.sleep(200)
+            }
+            rows.put(row)
+        }
+        return JSONObject().put("methods", rows).put("redirect", verdicts).put("callMode", MicPath.Mode.name(callMode))
+    }
+
+    private class Measured(val floor: Double, val toneRatio: Double, val downAlive: Boolean) { val tone get() = toneRatio > 20 }
+
+    /** 0.5 s with nothing injected (uplink floor, downlink), then 0.6 s of a 1 kHz tone (its share in the uplink). */
+    private fun measure(up: Capture, down: Capture?, inj: Inject, rate: Int): Measured {
+        val frame = rate / 50
+        val b = ShortArray(frame); val d = ShortArray(frame)
+        var floor = 0.0; var base = 0.0; var nz = 0
+        repeat(25) {
+            val n = up.read(b); if (n > 0) { floor += rms(b, n); base += goertzel(b, n, 1000.0, rate) }
+            down?.let { c -> val k = c.read(d); if (k > 0) nz += nonZero(d, k) }
+        }
+        val tone = tone(1000.0, rate, frame, amp = 8000.0)
+        var hit = 0.0
+        repeat(30) { inj.write(tone); val n = up.read(b); if (it >= 15 && n > 0) hit += goertzel(b, n, 1000.0, rate) }
+        return Measured(floor / 25, (hit / 15) / (base / 25 + 1e-3), nz >= RedirectGuard.ALIVE_SAMPLES * 2)
     }
 
     /** A helper that died mid-call would leave the phone silent for its next own call: always start clean. */
     fun restoreLocalCallAudio() {
         when (silence) {
-            Silence.SAMSUNG, Silence.MEDIATEK -> localCallAudio(muted = false, errors = org.json.JSONArray())
+            Silence.SAMSUNG, Silence.MEDIATEK -> localCallAudio(muted = false, mic = false, errors = org.json.JSONArray())
             else -> runCatching {
                 if (am.isStreamMute(AudioManager.STREAM_VOICE_CALL)) { streamMuted = true; muteVoiceStream(false) }
             }

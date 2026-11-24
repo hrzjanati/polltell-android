@@ -11,18 +11,22 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Maven Central answers shared runners with 429 Too Many Requests at busy times; Google's mirror of it does not.
+  TETHER_MAVEN_CENTRAL_MIRROR: https://maven-central.storage-download.googleapis.com/maven2/
+
 jobs:
   android:
-    name: Android (A54 app, helper, core, client)
+    name: Android (phone app, helper, core, client)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@v6
       - name: Unit tests, lint, release builds
         working-directory: android
         run: >
@@ -32,18 +36,52 @@ jobs:
           :app:assembleRelease :helper:assembleRelease :client:assembleRelease
       - name: Test reports
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: android-test-reports
           path: android/*/build/reports/
+      # A build for testers without a release: debug-signed (CI has no release key), kept 30 days.
+      - name: Name the APKs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)-${GITHUB_SHA::7}
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/PolTell-$v-debug-signed.apk"
+          cp android/client/build/outputs/apk/release/client-release.apk "dist/PolTell-Client-$v-debug-signed.apk"
+      - name: APKs for testers
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: polltell-apks-debug-signed
+          path: dist/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  kotlin-library:
+    name: Kotlin library (JVM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Library tests, API docs, local publication (no Android SDK)
+        working-directory: android
+        run: ./gradlew --console=plain -Ptether.libraryOnly=true :core:test :core:dokkaGenerate :core:publishToMavenLocal
+      - name: Example (separate build against the published artifact)
+        working-directory: examples/kotlin-jvm
+        run: ./gradlew --console=plain run | tee out.txt && grep -qx ok out.txt
 
   hygiene:
     name: Whitespace, scripts, privacy patterns
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: git diff --check $(git hash-object -t tree /dev/null) HEAD -- . ':!ios/TetherCore/Sources/COpus'
-      - run: sh -n tools/dbg.sh && sh -n tools/lib.sh && sh -n tools/start-helper.sh
+      - run: sh -n tools/dbg.sh && sh -n tools/lib.sh && sh -n tools/start-helper.sh && bash -n tools/call-audio-test.command
       - run: sudo apt-get install -y zsh >/dev/null && zsh -n tools/device-test.sh && zsh -n tools/test-all.sh
       - run: zsh tools/check-private.sh --all

@@ -146,6 +146,13 @@ class CentralSession(
         id ?: 0
     }
 
+    /** Sends [m] with its own `id` / `re` (extensions: their requests and answers). False when the session is not up. */
+    fun sendMessage(m: Message): Boolean = synchronized(this) {
+        if (!isUp || over) return false
+        sendLocked(m.t, m.b, m.id, m.re)
+        true
+    }
+
     private fun sendLocked(t: String, b: JSONObject, id: Int? = null, re: Int? = null) {
         val s = session ?: return
         val data = Message(t, b, id, re).toJson()

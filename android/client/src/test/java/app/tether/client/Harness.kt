@@ -26,6 +26,8 @@ import app.tether.core.RecordReader
 import app.tether.core.SecureSession
 import app.tether.core.Sms
 import app.tether.core.T
+import app.tether.core.ext.ExtensionLink
+import app.tether.core.ext.ExtensionRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyPair
@@ -98,6 +100,14 @@ class FakePhone(val static: KeyPair = P256.generate()) {
     var audioOwner = false
     var nextSmsId = 1000L
     var pageSize = 2
+    /** Extensions on the "phone", routed like Hub does (protocol §7); null: a phone from before extensions. */
+    var extensions: ExtensionRegistry? = null
+    val extLink = object : ExtensionLink {
+        override val peerName = "Test phone client"
+        override val peerKind = "android"
+        override val transport = "memory"
+        override fun send(m: Message): Boolean { if (session == null || !up) return false; sendMessage(m); return true }
+    }
 
     fun attach(w: Wire) {
         wire = w; w.phone = this
@@ -132,6 +142,7 @@ class FakePhone(val static: KeyPair = P256.generate()) {
             if (pairMode) { paired.removeAll { it.contentEquals(pendingKey!!) }; paired.add(pendingKey!!); token = null }
             write(fin)
             up = true
+            extensions?.linkUp(extLink)
             send(T.CALL_LIST, JSONObject().put("calls", JSONArray(live.values.toList())))
             return
         }
@@ -147,13 +158,19 @@ class FakePhone(val static: KeyPair = P256.generate()) {
         write(s.seal(Proto.CH_CONTROL, Message(t, b, null, re).toJson()))
     }
 
+    fun sendMessage(m: Message) = write(session!!.seal(Proto.CH_CONTROL, m.toJson()))
+
     fun sendAudio(f: AudioFrame) = write(session!!.seal(Proto.CH_AUDIO, f.encoded()))
 
     private fun onMessage(m: Message) {
         got.add(m)
         when (m.t) {
             T.PING -> send(T.PONG, JSONObject().put("ts", m.b.optLong("ts")), re = m.id)
-            T.SYNC -> sync(m.b.optLong("sms"), m.b.optLong("calls"), m.b.optString("contacts"))
+            T.SYNC -> {
+                extensions?.peerCaps(extLink, m.b.optJSONArray("caps"))
+                sync(m.b.optLong("sms"), m.b.optLong("calls"), m.b.optString("contacts"))
+                extensions?.let { send(T.STATUS, JSONObject().put("caps", it.capsJson())) }
+            }
             T.SMS_SEND -> {
                 send(T.SMS_RESULT, JSONObject().put("ok", true).put("state", "sent"), re = m.id)
                 val row = Sms(nextSmsId++, 7, m.b.getString("to"), m.b.getString("body"), System.currentTimeMillis(), 2, true, m.b.optInt("sub"))
@@ -179,6 +196,7 @@ class FakePhone(val static: KeyPair = P256.generate()) {
             }
             T.CALL_END, T.CALL_REJECT -> { setCall(m.b.getString("cid"), "ended"); if (audioOwner) { audioOwner = false; send(T.AUDIO_STOP) } }
             T.CALL_TAKE -> { audioOwner = true; live[m.b.getString("cid")]?.let { it.remove("elsewhere"); it.remove("where"); send(T.CALL_STATE, it) }; startAudio() }
+            else -> extensions?.route(extLink, m)
         }
     }
 
@@ -250,7 +268,8 @@ class TestEffects : Effects {
  * The client as the app wires it, minus Bluetooth and Telecom: a [CentralSession] per link, the [ClientCore] with the
  * synced state, the call tracker and an audio recorder, over a [Wire] to a [FakePhone].
  */
-class TestClient(val phone: FakePhone, val key: KeyPair = P256.generate(), val fx: TestEffects = TestEffects()) {
+class TestClient(val phone: FakePhone, val key: KeyPair = P256.generate(), val fx: TestEffects = TestEffects(),
+                 val extensions: ExtensionRegistry? = null) {
     var session: CentralSession? = null
     var rejected: Int? = null
     var failed: String? = null
@@ -264,7 +283,15 @@ class TestClient(val phone: FakePhone, val key: KeyPair = P256.generate(), val f
     val audio = RecordingAudio()
     var clock = 0L
     val calls = CallTracker(port, sink, nameOf = { state.name(it) }, now = { clock })
-    val core = ClientCore(state, calls, audio, ClientHello("android", "Test phone", listOf("opus", "pcmu")))
+    val extLink = object : ExtensionLink {
+        override val peerName = "Test phone"
+        override val peerKind = "phone"
+        override val transport = "memory"
+        override val inCall get() = calls.hasCalls
+        override fun send(m: Message) = session?.sendMessage(m) ?: false
+    }
+    val core = if (extensions == null) ClientCore(state, calls, audio, ClientHello("android", "Test phone", listOf("opus", "pcmu")))
+        else ClientCore(state, calls, audio, ClientHello("android", "Test phone", listOf("opus", "pcmu")), extensions, extLink)
 
     /** Opens a session over a fresh wire; [token] for pair mode. */
     fun connect(token: ByteArray? = null, chunk: Int = 4096): CentralSession {

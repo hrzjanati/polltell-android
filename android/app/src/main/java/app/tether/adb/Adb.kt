@@ -68,9 +68,18 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
     /** Pairs with the 6-digit code shown in Settings › Wireless debugging › Pair device with pairing code. */
     fun pairWithCode(code: String): Boolean {
-        val (host, port) = discover(AdbMdns.SERVICE_TYPE_TLS_PAIRING, 15)
+        val (host, port) = findPairingService()
             ?: throw IllegalStateException("pairing service not found; keep the pairing dialog open")
-        Log.i(TAG, "pairing with $host:$port")
+        if (!pairAt(host, port, code)) throw IllegalStateException("wrong or expired pairing code")
+        return true
+    }
+
+    /** The pairing service Settings announces while "Pair device with pairing code" is open (mDNS, up to 15 s). */
+    fun findPairingService(): Pair<String, Int>? = discover(AdbMdns.SERVICE_TYPE_TLS_PAIRING, 15)
+
+    /** False when adbd refused the code (wrong, or the dialog was closed and it expired). */
+    fun pairAt(host: String, port: Int, code: String): Boolean {
+        Log.i(TAG, "pairing with the pairing service on port $port")
         return pair(host, port, code.trim())
     }
 
@@ -200,27 +209,13 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
     }
 }
 
+/** The notification's code field. Only checks the code and hands the work to [AdbPairing] (never blocks the broadcast). */
 class AdbPairingReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val code = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(Adb.KEY_CODE)?.toString()?.filter { it.isDigit() }
-        if (code.isNullOrEmpty()) return
-        val app = context.applicationContext as TetherApp
-        Adb.updateNotification(context, context.getString(R.string.adb_pairing), false)
-        val pending = goAsync()
-        Thread {
-            try {
-                Adb.get(context).pairWithCode(code)
-                app.prefs.edit().putBoolean("adb_paired", true).apply()
-                Adb.bootstrap(context)
-                Adb.updateNotification(context, context.getString(R.string.adb_paired), true)
-                app.hub.helper.ensureRunning()
-                app.hub.refresh()
-            } catch (t: Throwable) {
-                Log.w(Adb.TAG, "pairing failed", t)
-                Adb.updateNotification(context, context.getString(R.string.adb_failed, t.message ?: t.javaClass.simpleName), false)
-            } finally {
-                pending.finish()
-            }
-        }.start()
+        val typed = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(Adb.KEY_CODE)?.toString()
+        val code = AdbPairing.normalizeCode(typed)
+        // Always answer the reply: a notification that is not posted again keeps its spinner forever.
+        if (code == null) { AdbPairing.show(context, AdbPairing.Result.BAD_CODE, null); return }
+        AdbPairing.start(context, code)
     }
 }

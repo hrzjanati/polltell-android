@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import app.tether.TetherApp
 import app.tether.adb.Adb
+import app.tether.audio.CallAudioReport
 import app.tether.audio.HelperBridge
 import app.tether.audio.OpusCodec
 import app.tether.audio.Spacing
@@ -12,8 +13,12 @@ import app.tether.audio.PcmuCodec
 import app.tether.audio.VoiceCodec
 import app.tether.core.AudioFrame
 import app.tether.core.CallInfo
+import app.tether.core.Ext
 import app.tether.core.Message
 import app.tether.core.T
+import app.tether.core.ext.ExtensionLink
+import app.tether.core.ext.ExtensionRegistry
+import app.tether.ext.phoneExtensions
 import app.tether.core.idRanges
 import app.tether.core.paginate
 import app.tether.data.ContactsRepo
@@ -22,6 +27,8 @@ import app.tether.data.UssdCode
 import app.tether.telecom.FindPhone
 import app.tether.telecom.RingerControl
 import app.tether.telecom.CallRegistry
+import app.tether.helper.LocalMutes
+import app.tether.helper.MicPath
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -35,6 +42,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     companion object {
         const val TAG = "Tether"
         const val PAGE_WEIGHT = 12_000
+        /** Before the phone-mic setting: "mute this phone's microphone during bridged calls" (true reads as "mute"). */
+        const val PREF_MIC_MUTE = "phone_mic_mute"
+        /** "This phone's microphone during bridged calls": MicPath.Setting auto (default) | mute | open (issue #2). */
+        const val PREF_MIC = "phone_mic"
         /** Debug flag (adb): validate send/dial/add without touching the radio or the provider. */
         @Volatile var dryRun = false
     }
@@ -77,6 +88,29 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         try { block() } catch (t: Throwable) { Log.e(TAG, "hub task failed", t) }
     }
 
+    /** Extensions (protocol §7, docs/EXTENDING.md): their handlers run on their own thread, never on a link's reader. */
+    private val extThread = Executors.newSingleThreadExecutor { r -> Thread(r, "ext") }
+    val extensions = ExtensionRegistry(log = { Log.i(TAG, "ext: $it") }, clock = SystemClock::elapsedRealtime,
+        dispatch = { extThread.execute(it) }, onStatusChanged = { bg { pushStatus() } }).apply {
+        for (e in phoneExtensions(app)) runCatching { register(e) }.onFailure { Log.e(TAG, "extension not registered", it) }
+    }
+    private val extLinks = ConcurrentHashMap<Connection, ExtensionLink>()
+
+    /** A connection as the extensions see it. Unsolicited extension messages follow the broadcast rules (test isolation). */
+    private fun ext(c: Connection): ExtensionLink = extLinks.getOrPut(c) {
+        object : ExtensionLink {
+            override val peerName get() = c.name
+            override val peerKind get() = c.kind
+            override val transport get() = c.transport.label
+            override val inCall get() = audio.running && audio.target === c
+            override val dry get() = dry(c)
+            override fun send(m: Message): Boolean {
+                if (!c.isUp || (m.re == null && c !in targets())) return false
+                c.send(m); return true
+            }
+        }.also { extensions.linkUp(it) }
+    }
+
     fun addListener(l: () -> Unit) = listeners.add(l)
     fun removeListener(l: () -> Unit) = listeners.remove(l)
     fun refresh() = listeners.forEach { runCatching { it() } }
@@ -86,8 +120,12 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     /** Once per process: a recreated LinkService must not add a second set of listeners and timers. */
     fun startBackground() {
         if (!started.compareAndSet(false, true)) return
+        extensions.start()
         helper.listen()
         helper.onChange = { refresh(); bg { pushStatus() } }
+        helper.onInfo = { audio.onHelperInfo(it) }
+        helper.onUplink = { audio.onHelperUplink(it) }
+        helper.onMic = { audio.onHelperMic(it) }
         // Airplane mode switched on from a client before a restart: keep the fail-safe running.
         if (app.prefs.getBoolean("airplane_by_tether", false)) bg { airplaneFailSafe(true) }
         // Call events go out from the Telecom callback itself, ahead of anything queued (ring latency).
@@ -166,6 +204,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         c.send(Message(T.CALL_LIST, JSONObject().put("calls", JSONArray(CallRegistry.list().map { callJson(it, c) }))))
         // A client paired just now has no kind yet (iPhone or Android phone): it says so in its first sync.
         if (newlyPaired) kindPending.add(c) else holdLeFor(c)
+        ext(c)
         LinkService.running?.peripheral?.tune(c.transport.address, high = audio.target === c || audio.owner === c)
         audioCtl.execute { audio.reconcile() }
         bg { pushStatus() }
@@ -188,6 +227,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
     override fun onClosed(c: Connection) {
         kindPending.remove(c)
+        extLinks.remove(c)?.let(extensions::linkDown)
         lastClientSeen = SystemClock.elapsedRealtime()
         if (conns.remove(c)) {
             if (conns.none { it.isUp }) LinkService.running?.peripheral?.setLinked(false)
@@ -236,6 +276,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                     refresh()
                 }
                 if (kindPending.remove(c) && c.isUp) holdLeFor(c)
+                extensions.peerCaps(ext(c), m.b.optJSONArray(Ext.CAPS))   // absent (older clients): no extensions
                 bg { sync(c, m.b.optLong("sms"), m.b.optLong("calls"), m.b.optString("contacts")) }
             }
             T.SMS_SEND -> bg { sendSms(c, m) }
@@ -337,12 +378,22 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 pushStatus()
             }
             T.SELFTEST -> slowBg { c.send(Message(T.SELFTEST_RESULT, selftest(), re = m.id)) }
+            // {mic} (auto | mute | open) or, from older clients, {micMute}: "the Android phone's microphone during bridged
+            // calls"; answered with a status.
+            T.AUDIO_SET -> bg {
+                if ((m.b.has("mic") || m.b.has("micMute")) && !dry(c))
+                    audio.setMic(MicPath.Setting.of(m.b.optString("mic").takeIf { m.b.has("mic") }, m.b.optBoolean("micMute")))
+                Log.i(TAG, "audio.set ${m.b} (dry=${dry(c)})")
+                lastStatusSent.remove(c)   // the asking client always gets the status, also when nothing changed
+                pushStatus()
+            }
             T.UNPAIR -> if (!c.transport.dry) {
                 c.peerKey?.let { app.keys.removeCentral(it) }
                 c.close("unpaired by ${c.name}")
                 refresh()
             }
-            else -> Log.d(TAG, "ignored message ${m.t}")
+            // Extension types (x.…) and errors answering an extension's request; everything else stays ignored.
+            else -> if (!extensions.route(ext(c), m)) Log.d(TAG, "ignored message ${m.t}")
         }
     }
 
@@ -576,9 +627,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     // ------------------------------------------------------------------ status, calls
 
     /** `tools` says what the Phone section of the iPhone's Link tab may offer (absent from older builds: hidden there). */
-    fun statusJson(): JSONObject = app.sims.status(helper.state())
+    fun statusJson(): JSONObject = app.sims.status(audio.helperStatus())
         .put("tools", JSONObject().put("ussd", true).put("find", true).put("ringer", true))
         .put("ringer", ringer.mode()).put("dnd", ringer.dndAccess())
+        .put(Ext.CAPS, extensions.capsJson())
 
     /** Status plus the list of connected clients (each client sees which one is itself). */
     /** Synchronized: callers on other threads (battery, data SIM) must not send a stale status after a newer one. */
@@ -590,6 +642,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val clients = JSONArray(live.map { o -> JSONObject().put("name", o.name).put("kind", o.kind)
                 .put("self", o === c).put("audio", o === audio.target) })
             val body = JSONObject(base).put("clients", clients)
+            extensions.statusFor(ext(c))?.let { body.put(Ext.STATUS, it) }
             // Only when something changed: every status wakes the iPhone app and makes it save.
             val key = body.toString()
             if (lastStatusSent[c] == key) continue
@@ -700,10 +753,20 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                     .apply { probe?.let { put("probe", it) } }
             }
             else -> {
+                // How the call's own audio ran until now (methods, the phone's mic mute): the test itself pauses it.
+                val path = audio.pathRow()
                 audio.pause()
                 try {
-                    (helper.request("selftest", 40) ?: JSONObject().put("methods", JSONArray()))
-                        .also { r -> r.optString("chosen").takeIf { it.isNotEmpty() }?.let { app.prefs.edit().putString("inject", it).apply() } }
+                    val r = helper.request("selftest", 50) ?: JSONObject().put("methods", JSONArray())
+                    val chosen = r.optString("chosen").takeIf { it.isNotEmpty() }
+                    // The redirect modes' answers (MicPath), remembered for this phone model like the in-call check's.
+                    if (!audio.onlyTestLine()) MicPath.memoryOf(r.optJSONObject("redirect")).forEach { (mode, v) -> audio.rememberRedirect(mode, v, "self-test") }
+                    chosen?.let { app.prefs.edit().putString("inject", it).apply() }
+                    val rows = JSONArray().put(path)
+                    r.optJSONArray("methods")?.let { a -> for (i in 0 until a.length()) rows.put(a.get(i)) }
+                    // The tone reached the uplink without any local mute: does it with the phone's mic muted too?
+                    if (chosen != null) muteRow(chosen, r.optBoolean("micByTelecom"))?.let { rows.put(it) }
+                    r.put("methods", rows)
                 } finally {
                     audio.resume()
                 }
@@ -712,6 +775,27 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         lastSelftest = result
         refresh()
         return result
+    }
+
+    /**
+     * The self-test's second pass: the chosen inject method again with the phone's microphone muted (the vendor key in
+     * the helper, or Android's mic mute here). Its answer is remembered for this phone model, as the in-call check's is.
+     */
+    private fun muteRow(method: String, byTelecom: Boolean): JSONObject? {
+        if (byTelecom) { CallRegistry.mute(true); Thread.sleep(300) }
+        val r = try {
+            helper.request("selftest", 20, JSONObject().put("methods", JSONArray().put(method)).put("micMute", true).put("redirect", false))
+        } finally {
+            if (byTelecom) CallRegistry.mute(false)
+        }
+        val row = r?.optJSONArray("methods")?.optJSONObject(0) ?: return null
+        val ok = row.optBoolean("ok")
+        audio.remember(if (ok) LocalMutes.Memory.OK else LocalMutes.Memory.BREAKS_UPLINK)
+        LinkLog.add("self-test: $method with the phone's mic muted (${if (byTelecom) "Android" else "vendor key"}) " +
+            (if (ok) "still reaches the uplink" else "does NOT reach the uplink: mic mute kept off on this phone"))
+        return JSONObject().put("name", "inject:$method, phone mic muted").put("ok", ok).put("note",
+            (if (ok) "the iPhone's voice still reaches the call with this phone's mic muted" else
+                "muting this phone's mic silences the iPhone's voice: PolTell keeps the mic on") + "; " + row.optString("note"))
     }
 
     // ------------------------------------------------------------------ call audio
@@ -740,6 +824,12 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private var restarts = 0
         private var savedVolume = -1
         private var lastNoHelperLog = 0L
+        /** The helper's plan for this call says: mute the phone's mic through Telecom (only when the user asked, see LocalMutes). */
+        @Volatile private var telecomWanted = false
+        /** Telecom's mute was switched on by us (only then do we switch it off again). */
+        @Volatile private var telecomMutedByUs = false
+        /** The helper's last uplink report this call (to log only what changed). */
+        @Volatile private var lastUplinkSeen: JSONObject? = null
         private val am = app.getSystemService(android.media.AudioManager::class.java)
 
         // Latency instrumentation (see README "Latency").
@@ -777,11 +867,13 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
         /** After the helper's own figures for the call came in (they follow its stop), tell the client and log both. */
         private fun reportStats(c: Connection?, summary: String, before: JSONObject?) {
+            val testLine = onlyTestLine()
             Thread({
                 repeat(20) { if (helper.lastStats !== before) return@repeat; Thread.sleep(50) }
                 val h = helper.lastStats?.takeIf { it !== before }
                 val text = summary + (h?.let { "; helper " + helperSummary(it) } ?: "")
                 LinkLog.add("call audio: $text")
+                if (!testLine) h?.let { CallAudioReport.silentIphone(it) }?.let { LinkLog.add(it) }
                 if (c != null && c.isUp && c.transport.label != "memory")
                     c.sendUrgent(Message(T.AUDIO_STATS, JSONObject().put("summary", text).apply { h?.let { put("helper", it) } }))
             }, "audio-stats").apply { isDaemon = true }.start()
@@ -789,12 +881,122 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
         private fun helperSummary(h: JSONObject) = ("capture backlog %d/%d ms, trimmed %d ms, inject queue %d/%d ms (%d underruns, %d in the first second), " +
             "uplink dropped %d of %d frames, ahead %d/%d ms (target %d), quiet cut %d ms added %d ms, speech sped up %d ms slowed %d ms" +
-            "; clocks capture %.1f inject %.1f Hz").format(
+            "; clocks capture %.1f inject %.1f Hz; uplink speech %d frames, check %s, phone mic %s").format(
             h.optInt("captureBacklogMs"), h.optInt("captureBacklogMaxMs"), h.optInt("captureDroppedMs"),
             h.optInt("injectQueuedMs"), h.optInt("injectQueuedMaxMs"), h.optInt("injectUnderruns", -1), h.optInt("injectUnderrunsFirstSecond", -1),
             h.optInt("uplinkDroppedFrames"), h.optInt("uplinkFrames"), h.optInt("uplinkAheadMs"), h.optInt("uplinkAheadMaxMs"), h.optInt("uplinkTargetMs"),
             h.optInt("uplinkQuietCutMs"), h.optInt("uplinkQuietAddedMs"), h.optInt("uplinkSpedUpMs"), h.optInt("uplinkSlowedMs"),
-            h.optDouble("captureClockHz", -1.0), h.optDouble("injectClockHz", -1.0))
+            h.optDouble("captureClockHz", -1.0), h.optDouble("injectClockHz", -1.0), h.optInt("uplinkSpeechFrames", -1),
+            h.optJSONObject("uplink")?.optString("state") ?: "–",
+            h.optJSONObject("mic")?.takeIf { it.has("mode") }?.let { m -> "${m.optString("mode")} ${m.optString("state")}" + (m.optString("verdict").takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "") }
+                ?: h.optJSONObject("uplink")?.let { if (it.optBoolean("micMuted")) "muted" else if (it.optBoolean("unmuted")) "unmuted by the check" else "not muted" } ?: "–")
+
+        // ---------------------------------------------------------- the phone's own microphone (issue #2)
+
+        /**
+         * The user's "this phone's microphone during bridged calls" (MicPath): auto (default: a redirect mode takes it out
+         * of the call where the phone allows it, else it stays open), mute (LocalMutes), open. A phone set up before the
+         * setting existed keeps its "mute" choice.
+         */
+        val mic: MicPath.Setting get() = MicPath.Setting.of(app.prefs.getString(PREF_MIC, null), app.prefs.getBoolean(PREF_MIC_MUTE, false))
+        /** The mute is chosen (LocalMutes); kept for the old status field `micMute`. */
+        val micSetting: Boolean get() = mic == MicPath.Setting.MUTE
+        private val memoryKey get() = "uplink_mute:" + android.os.Build.MODEL
+        private val redirectKey get() = "mic_redirect:" + android.os.Build.MODEL
+        /** What this phone model showed of each redirect mode (in-call guard or self-test). */
+        fun redirectMemory(): Map<MicPath.Redirect, MicPath.Verdict> =
+            MicPath.memoryOf(app.prefs.getString(redirectKey, null)?.let { runCatching { JSONObject(it) }.getOrNull() })
+
+        fun rememberRedirect(mode: MicPath.Redirect, v: MicPath.Verdict, by: String) {
+            val m = redirectMemory().toMutableMap()
+            if (m[mode] == v) return
+            // A later "unverified" never hides what a check did see.
+            if (v == MicPath.Verdict.UNVERIFIED && m[mode] != null) return
+            m[mode] = v
+            app.prefs.edit().putString(redirectKey, MicPath.memoryJson(m).toString()).apply()
+            LinkLog.add("call audio: remembered for this phone ($by): ${mode.wire} ${v.wire}" +
+                (if (v.usable) "" else ", calls keep the phone's mic in the call unless another mode works"))
+        }
+        /** What a check found for this phone model (in-call check or self-test). */
+        fun memory(): LocalMutes.Memory? = LocalMutes.Memory.of(app.prefs.getString(memoryKey, null))
+
+        fun remember(m: LocalMutes.Memory) {
+            if (memory() == m) return
+            app.prefs.edit().putString(memoryKey, m.wire).apply()
+            LinkLog.add("call audio: remembered for this phone: ${if (m == LocalMutes.Memory.OK) "the mic mute keeps the uplink" else "the mic mute silences the uplink, calls start without it"}")
+        }
+
+        /** Changed on this phone or from a client: a new choice also forgets what earlier checks found, so all is tried anew. */
+        fun setMic(setting: MicPath.Setting) {
+            app.prefs.edit().putString(PREF_MIC, setting.wire).remove(PREF_MIC_MUTE).remove(memoryKey).remove(redirectKey).apply()
+            LinkLog.add("call audio: the phone's own mic during bridged calls: ${setting.wire}")
+            if (running) helper.local(setting.wire, LocalMutes.wantMicMute(setting == MicPath.Setting.MUTE, null), LocalMutes.wantCheck(null))
+            refresh()
+        }
+
+        /** Kept for the debug hook `mic_mute on|off`: on = mute, off = the default. */
+        fun setMicSetting(on: Boolean) = setMic(if (on) MicPath.Setting.MUTE else MicPath.Setting.AUTO)
+
+        /**
+         * Status `helper`: the helper's state, the setting (`mic`, and `micMute` for older clients), what the phone's mic
+         * does in this call (`micPath` off | muted | open) and the uplink (this call's check, else what this phone remembers).
+         */
+        fun helperStatus(): JSONObject = helper.state().put("mic", mic.wire).put("micMute", micSetting).apply {
+            val live = if (running) helper.lastUplink?.optString("state")?.takeIf { it.isNotEmpty() } else null
+            (live ?: if (mic == MicPath.Setting.MUTE) memory()?.wire else redirectMemory().values.firstOrNull { it == MicPath.Verdict.OK }?.wire)?.let { put("uplink", it) }
+            if (running) helper.lastMic?.optString("path")?.takeIf { it.isNotEmpty() }?.let { put("micPath", it) }
+        }
+
+        /** The self-test's first row: how this call's audio ran before the test paused it. */
+        fun pathRow(): JSONObject {
+            val info = helper.lastInfo
+            val inject = info?.optString("inject")?.takeIf { it.isNotEmpty() && it != "null" }
+            val capture = info?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }
+            return JSONObject().put("name", "call-audio").put("ok", running && inject != null).put("note",
+                if (!running || info == null) "this call's audio was not bridged" else
+                    "inject=${inject ?: "NONE"} capture=${capture ?: "NONE"}; ${CallAudioReport.micLine(helper.lastUplink, micSetting, memory(), helper.lastMic)}; " +
+                        "the tests below run with the phone's mic unmuted and the call in its own mode, except the mic rows")
+        }
+
+        /** The helper's start INFO for a call: one link-log line saying whether the uplink injection opened. */
+        fun onHelperInfo(o: JSONObject) {
+            if (running) LinkLog.add(CallAudioReport.pathLine(o, micSetting, memory()))
+        }
+
+        /** The helper's mic report: log what changed, remember what the redirect guard found for this phone model. */
+        @Volatile private var lastMicSeen: JSONObject? = null
+        fun onHelperMic(m: JSONObject) {
+            val before = lastMicSeen
+            lastMicSeen = m
+            CallAudioReport.micEvent(m, before)?.let { LinkLog.add(it) }
+            val mode = MicPath.Redirect.of(m.optString("mode")) ?: return
+            MicPath.Verdict.of(m.optString("verdict"))?.let { if (!onlyTestLine()) rememberRedirect(mode, it, "in-call check") }
+        }
+
+        /** An uplink report (mic mute, check): follow its Telecom mute, log what changed, remember a result. */
+        fun onHelperUplink(u: JSONObject) {
+            val before = lastUplinkSeen
+            lastUplinkSeen = u
+            telecomWanted = u.optBoolean("telecomMicMute")
+            CallAudioReport.uplinkEvent(u, before)?.let { LinkLog.add(it) }
+            // Only the mute's check counts for the mute (the redirect mode's results come with the mic report).
+            if (u.optString("for", "mute") == "mute") when (u.optString("state")) {
+                "ok" -> if (u.optBoolean("micMuted") && before?.optString("state") == "checking") remember(LocalMutes.Memory.OK)
+                "muted-locally-fixed" -> remember(LocalMutes.Memory.BREAKS_UPLINK)
+            }
+            audioCtl.execute { reconcile() }
+        }
+
+        private fun startHelper(rate: Int, inject: String) {
+            val mem = memory()
+            telecomWanted = false
+            lastUplinkSeen = null
+            lastMicSeen = null
+            // The test line is VoIP with no far end: its results say nothing about real calls, so they are not remembered.
+            helper.start(rate, "auto", inject, app.prefs.getInt("inject_ms", 40), onlyTestLine(), mic = mic.wire,
+                micMute = LocalMutes.wantMicMute(micSetting, mem), micCheck = LocalMutes.wantCheck(mem),
+                redirect = if (onlyTestLine()) JSONObject() else MicPath.memoryJson(redirectMemory()))
+        }
 
         /** A client reconnected (new link replacing its old one): the call audio follows it. */
         fun handOver(old: Connection, new: Connection) {
@@ -912,7 +1114,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             }
             quietLocalEarpiece(true) // before the helper drops it to 0, so the saved level is the user's
             infoAtStart = helper.lastInfo
-            helper.start(k.rate, "auto", app.prefs.getString("inject", "auto") ?: "auto", app.prefs.getInt("inject_ms", 40), onlyTestLine())
+            startHelper(k.rate, app.prefs.getString("inject", "auto") ?: "auto")
             c.sendUrgent(startMessage(k))
             muteLocalMic(true)
             LinkService.running?.peripheral?.tune(c.transport.address, high = true)
@@ -939,7 +1141,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         }
 
         /** Every call that wants audio is on Tether's own test line (none reaches a SIM). */
-        private fun onlyTestLine(): Boolean {
+        fun onlyTestLine(): Boolean {
             val calls = CallRegistry.active()
             return calls.isNotEmpty() && calls.all { CallRegistry.isTestCall(app, CallRegistry.cidOf(it)) }
         }
@@ -953,7 +1155,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             restarts++
             Log.w(TAG, "helper using capture=$capture inject=$inject; retry $restarts")
             startedAt = SystemClock.elapsedRealtime()
-            helper.start(codec?.rate ?: 16000, "auto", "auto", app.prefs.getInt("inject_ms", 40), onlyTestLine())
+            startHelper(codec?.rate ?: 16000, "auto")
         }
 
         fun stop(sendStop: Boolean = true) { lock.lock(); try { stopLocked(sendStop) } finally { lock.unlock() } }
@@ -971,6 +1173,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             codec?.release()
             codec = null
             target = null
+            telecomWanted = false
             muteLocalMic(false)
             quietLocalEarpiece(false)
             t?.let { LinkService.running?.peripheral?.tune(it.transport.address, high = false) }
@@ -979,22 +1182,18 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         }
 
         /**
-         * While bridged, only the iPhone's microphone may reach the call: mute the Android phone's own mic through
-         * Telecom (besides the helper's own per-vendor silencing). The iPhone's mute button is separate (it silences
-         * the injected uplink).
+         * Android's mic mute (Telecom) for a bridged call, only where the helper's plan says so: the user turned the
+         * phone's mic mute on, the vendor has no key of its own, and the uplink check has not undone it. On several HALs
+         * this mute also silences the injected uplink (issue #2), so it is never on by default. The iPhone's mute button
+         * is separate (it silences the injected uplink).
          */
         private fun muteLocalMic(on: Boolean) {
-            // Off by default: on some phones (MediaTek; Samsung Galaxy Z Fold5 on Android 17) Telecom's mic mute also
-            // silences the injected uplink, so the far end heard nothing from the iPhone. The helper's per-vendor
-            // silencing still keeps the Android phone's own mic out where the phone allows it.
-            if (!app.prefs.getBoolean("mute_local_mic", false)) {
-                if (!on && CallRegistry.isMuted()) CallRegistry.mute(false)
-                return
+            val want = on && telecomWanted
+            if (want && !CallRegistry.isMuted()) {
+                if (CallRegistry.mute(true)) { telecomMutedByUs = true; Log.i(TAG, "Android phone mic muted through Telecom for bridged call") }
+            } else if (!want && telecomMutedByUs) {
+                if (!CallRegistry.isMuted() || CallRegistry.mute(false)) { telecomMutedByUs = false; Log.i(TAG, "Android phone mic unmuted through Telecom") }
             }
-            // Where the Android mic mute also mutes the injected uplink (MediaTek), the helper silences the mic its own
-            // way and says so: then the phone's mic is never muted through Telecom (the far end would hear nothing).
-            val want = on && helper.lastInfo?.optBoolean("telecomMicMute", true) != false
-            if (CallRegistry.isMuted() != want && CallRegistry.mute(want)) Log.i(TAG, "Android phone mic ${if (want) "muted" else "unmuted"} through Telecom for bridged call")
         }
 
         /** While the call is bridged to the iPhone, the Android phone's own earpiece goes to its lowest volume. */

@@ -1,5 +1,6 @@
 package app.tether.link
 
+import app.tether.adb.AdbPairing
 import app.tether.adb.Adb
 import app.tether.core.Phone as PhoneEntry
 import android.content.BroadcastReceiver
@@ -7,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import app.tether.TetherApp
+import app.tether.helper.MicPath
 import app.tether.core.AudioFrame
 import app.tether.core.CentralHandshake
 import app.tether.core.Message
@@ -50,6 +52,20 @@ class DebugReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }.start()
+    }
+
+    /** x.tether.echo to every client that announced it: round trip, clock offset and transport per answer. */
+    private fun extEcho(app: TetherApp, data: String?): String {
+        val echo = app.hub.extensions.extensions.filterIsInstance<app.tether.core.ext.EchoExtension>().firstOrNull() ?: return "echo not registered"
+        val results = LinkedBlockingQueue<app.tether.core.ext.EchoExtension.Result>()
+        echo.onResult = { results.put(it) }
+        try {
+            val sent = app.hub.extensions.sessions(echo).count { echo.ping(it, data) != null }
+            val got = (1..sent).mapNotNull { results.poll(3, TimeUnit.SECONDS) }
+            return "sent $sent, answered ${got.size}" + got.joinToString("") { r ->
+                if (r.error != null) "; error ${r.error}" else "; rtt ${r.rttMs} ms, offset ${r.offsetMs} ms, via ${r.via}, ${r.bytes} bytes"
+            }
+        } finally { echo.onResult = null }
     }
 
     private fun run(app: TetherApp, cmd: String, intent: Intent): String = when (cmd) {
@@ -187,6 +203,9 @@ class DebugReceiver : BroadcastReceiver() {
         "airplane" -> app.hub.helper.ensureRunning()?.let { "helper: $it" } ?: app.hub.setAirplane(intent.getStringExtra("on") == "on").toString()
         // linklog [n]: the persistent Bluetooth link event log
         "linklog" -> LinkLog.tail(intent.getStringExtra("n")?.toIntOrNull() ?: 120)
+        // Extensions (protocol §7): what is registered, what each client announced, counters; no message contents.
+        "ext" -> app.hub.extensions.debug().toString()
+        "ext_echo" -> extEcho(app, intent.getStringExtra("data"))
         // net datasub <subId>: choose the SIM that carries mobile data
         "net_datasub" -> app.hub.helper.ensureRunning()?.let { "helper: $it" }
             ?: app.hub.helper.net("dataSub", true, intent.getStringExtra("sub")?.toIntOrNull()).toString()
@@ -204,6 +223,19 @@ class DebugReceiver : BroadcastReceiver() {
             app.prefs.edit().apply { if (v == null) remove("inject_ms") else putInt("inject_ms", v.coerceIn(20, 200)) }.apply()
             "inject_ms=${app.prefs.getInt("inject_ms", 40)}"
         }
+        // mic_mute on|off|state: "mute this phone's mic during bridged calls" (on/off also forget the remembered check result).
+        "mic_mute" -> {
+            when (intent.getStringExtra("on")) { "on" -> app.hub.audio.setMicSetting(true); "off" -> app.hub.audio.setMicSetting(false) }
+            app.hub.pushStatus()
+            "micMute=${app.hub.audio.micSetting} remembered=${app.hub.audio.memory()?.wire ?: "none"} helper=${app.hub.audio.helperStatus()} uplink=${app.hub.helper.lastUplink}"
+        }
+        // mic auto|mute|open|state: "this phone's microphone during bridged calls" (a new choice forgets what was remembered).
+        "mic" -> {
+            intent.getStringExtra("on")?.let { w -> MicPath.Setting.entries.firstOrNull { it.wire == w } }?.let { app.hub.audio.setMic(it) }
+            app.hub.pushStatus()
+            "mic=${app.hub.audio.mic.wire} redirect=${MicPath.memoryJson(app.hub.audio.redirectMemory())} mute=${app.hub.audio.memory()?.wire ?: "none"} " +
+                "helper=${app.hub.audio.helperStatus()} micReport=${app.hub.helper.lastMic} uplink=${app.hub.helper.lastUplink}"
+        }
         "only" -> { app.hub.onlyKind = intent.getStringExtra("kind")?.takeIf { it != "off" }; "only=${app.hub.onlyKind}" }
         "audio_stats" -> "hub: down=${app.hub.audio.downFrames} up=${app.hub.audio.upFrames} " +
             "encode=%.2f ms decode=%.2f ms ".format(app.hub.audio.encodeNanos / maxOf(1, app.hub.audio.downFrames) / 1e6, app.hub.audio.decodeNanos / maxOf(1, app.hub.audio.upFrames) / 1e6) +
@@ -216,9 +248,12 @@ class DebugReceiver : BroadcastReceiver() {
         "loopback_call" -> loopbackCall(app, intent.getStringExtra("sync") == "full", intent.getStringExtra("mode") ?: "answer")
         "loopback_handover" -> loopbackHandover(app)
         "adb_pair" -> {
-            val code = intent.getStringExtra("code") ?: error("--es code required")
-            app.adbPairAndBootstrap(code)
+            // The notification's path (a short foreground service), so this hook never blocks its broadcast either.
+            val code = AdbPairing.normalizeCode(intent.getStringExtra("code")) ?: error("--es code with 6 digits required")
+            AdbPairing.start(app, code); "started (see the notification and the log)"
         }
+        // adb_pair_clear: removes the pairing notification (after testing adb_pair on a phone that is already paired).
+        "adb_pair_clear" -> { app.getSystemService(android.app.NotificationManager::class.java).cancel(Adb.NOTIF_ADB); "cleared" }
         "adb_shell" -> app.adbShell(intent.getStringExtra("sh") ?: "id")
         "helper_start" -> app.hub.helper.ensureRunning() ?: "helper running"
         "helper_quit" -> if (app.hub.helper.quit()) "quit sent" else "helper not connected"
