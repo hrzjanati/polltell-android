@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## PolTell 0.7.0 — 2026-11-25
+
+- Same Android code as Tether 1.1.0, line for line, apart from the PolTell look (purple theme, icons, names, the
+  MainViewModel screen); released together with the iPhone app 0.7.0, whose logic now also follows Tether 1.1.0.
+
 ## PolTell 0.5.0 — 2026-11-24
 
 - Android app: a purple-gradient look (teal secondary) with a new purple app icon; the screen is now built from a
